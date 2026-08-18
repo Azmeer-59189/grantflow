@@ -1,1 +1,21 @@
-# Python dependencies will be added in the next build step.
+# Web API framework and local development server.
+fastapi
+uvicorn[standard]
+
+# Read environment variables safely from the local .env file.
+python-dotenv
+pydantic-settings
+
+# Supabase database and authentication client.
+supabase
+
+# Google Sheets service-account connection.
+google-api-python-client
+google-auth
+
+# Fixed-format report generators.
+reportlab
+python-docx
+
+# Verify Supabase JWT access tokens in the FastAPI backend.
+PyJWT[crypto]
