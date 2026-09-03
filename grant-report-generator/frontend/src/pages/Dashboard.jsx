@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom'
 import { supabase } from '../supabase'
 import {
   PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer,
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, LabelList
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, LabelList,
+  LineChart, Line, ComposedChart, Area
 } from 'recharts'
 
 // Color constants matching the reference design
@@ -361,145 +362,160 @@ function Dashboard({ session }) {
 
                 {/* Charts Row */}
 {/* Charts Row */}
+{/* Charts Row */}
+{/* Bottom — Activity Line Chart */}
+<div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 mb-6">
+  <div className="flex justify-between items-start mb-4">
+    <div>
+      <h3 className="font-bold text-gray-800 text-sm">Grant Activity Over Time</h3>
+      <p className="text-xs text-gray-400 mt-0.5">
+        cumulative grants and payments by receiving date
+      </p>
+    </div>
+    <div className="flex gap-4">
+      <div className="flex items-center gap-1.5">
+        <div className="w-3 h-3 rounded-full bg-blue-600"></div>
+        <span className="text-xs text-gray-500">Grants</span>
+      </div>
+      <div className="flex items-center gap-1.5">
+        <div className="w-3 h-3 rounded-full bg-amber-400"></div>
+        <span className="text-xs text-gray-500">Payment (USD)</span>
+      </div>
+    </div>
+  </div>
+
+  {(() => {
+    // Build time series from grant_receiving_date
+    const dated = data.grants
+      .filter(g => g.grant_receiving_date)
+      .map(g => ({
+        date: g.grant_receiving_date,
+        payment: parseFloat(g.current_payment_usd) || 0
+      }))
+      .sort((a, b) => new Date(a.date) - new Date(b.date))
+
+    if (dated.length === 0) {
+      return (
+        <div className="flex items-center justify-center h-48
+                        text-gray-300 text-sm">
+          No date data yet — add Grant Receiving Dates to see activity
+        </div>
+      )
+    }
+
+    // Group by date and accumulate
+    const grouped = {}
+    dated.forEach(({ date, payment }) => {
+      if (!grouped[date]) grouped[date] = { date, count: 0, payment: 0 }
+      grouped[date].count += 1
+      grouped[date].payment += payment
+    })
+
+    // Make cumulative
+    let cumCount = 0
+    let cumPayment = 0
+    const chartData = Object.values(grouped)
+      .sort((a, b) => new Date(a.date) - new Date(b.date))
+      .map(d => {
+        cumCount += d.count
+        cumPayment += d.payment
+        return {
+          date: d.date,
+          grants: cumCount,
+          payment: Math.round(cumPayment),
+        }
+      })
+
+    return (
+      <ResponsiveContainer width="100%" height={260}>
+        <ComposedChart
+          data={chartData}
+          margin={{ top: 10, right: 20, left: 0, bottom: 10 }}
+        >
+          <defs>
+            <linearGradient id="grantsGrad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%" stopColor="#1D6FB8" stopOpacity={0.15}/>
+              <stop offset="95%" stopColor="#1D6FB8" stopOpacity={0}/>
+            </linearGradient>
+            <linearGradient id="paymentGrad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%" stopColor="#E8A916" stopOpacity={0.15}/>
+              <stop offset="95%" stopColor="#E8A916" stopOpacity={0}/>
+            </linearGradient>
+          </defs>
+
+          <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
+
+          <XAxis
+            dataKey="date"
+            tick={{ fontSize: 10, fill: '#9CA3AF' }}
+            axisLine={false}
+            tickLine={false}
+            interval="preserveStartEnd"
+          />
+
+          <YAxis
+            yAxisId="left"
+            orientation="left"
+            allowDecimals={false}
+            tick={{ fontSize: 10, fill: '#9CA3AF' }}
+            axisLine={false}
+            tickLine={false}
+            width={30}
+          />
+
+          <YAxis
+            yAxisId="right"
+            orientation="right"
+            tick={{ fontSize: 10, fill: '#9CA3AF' }}
+            axisLine={false}
+            tickLine={false}
+            width={50}
+            tickFormatter={v => `$${(v/1000).toFixed(0)}k`}
+          />
+
+          <Tooltip
+            contentStyle={{
+              borderRadius: '10px', border: 'none',
+              boxShadow: '0 4px 20px rgba(0,0,0,0.12)',
+              fontSize: '12px', padding: '10px 14px'
+            }}
+            formatter={(value, name) => [
+              name === 'payment' ? `$${value.toLocaleString()}` : value,
+              name === 'payment' ? 'Payment USD' : 'Grants'
+            ]}
+          />
+
+          {/* Shaded area under grants line */}
+          <Area
+            yAxisId="left"
+            type="monotone"
+            dataKey="grants"
+            stroke="#1D6FB8"
+            strokeWidth={2.5}
+            fill="url(#grantsGrad)"
+            dot={{ fill: '#1D6FB8', r: 4, strokeWidth: 0 }}
+            activeDot={{ r: 6, fill: '#1D6FB8', strokeWidth: 0 }}
+          />
+
+          {/* Shaded area under payment line */}
+          <Area
+            yAxisId="right"
+            type="monotone"
+            dataKey="payment"
+            stroke="#E8A916"
+            strokeWidth={2.5}
+            fill="url(#paymentGrad)"
+            dot={{ fill: '#E8A916', r: 4, strokeWidth: 0 }}
+            activeDot={{ r: 6, fill: '#E8A916', strokeWidth: 0 }}
+          />
+        </ComposedChart>
+      </ResponsiveContainer>
+    )
+  })()}
+</div>
+
+{/* Bottom Charts Row */}
 <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-
-  {/* Report Status Donut */}
-  <div className="bg-white rounded-2xl border border-gray-100
-                  shadow-sm p-6">
-    <div className="flex justify-between items-center mb-4">
-      <h3 className="font-semibold text-gray-700 text-sm uppercase
-                     tracking-wider">
-        Report Status
-      </h3>
-      <span className="text-xs text-gray-400">
-        {data.total_grants} total
-      </span>
-    </div>
-    {reportStatusData.length === 0 ? (
-      <div className="flex items-center justify-center h-48 text-gray-300 text-sm">
-        No data yet
-      </div>
-    ) : (
-      <div className="relative">
-        <ResponsiveContainer width="100%" height={220}>
-          <PieChart>
-            <Pie
-              data={reportStatusData}
-              cx="50%"
-              cy="50%"
-              innerRadius={65}
-              outerRadius={95}
-              paddingAngle={4}
-              dataKey="value"
-              strokeWidth={0}
-            >
-              {reportStatusData.map((entry, index) => (
-                <Cell
-                  key={index}
-                  fill={['#1D6FB8', '#E8A916'][index % 2]}
-                />
-              ))}
-            </Pie>
-            <Tooltip
-              contentStyle={{
-                borderRadius: '8px',
-                border: 'none',
-                boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-                fontSize: '12px'
-              }}
-            />
-            <Legend
-              iconType="circle"
-              iconSize={8}
-              formatter={(value) => (
-                <span style={{ fontSize: '12px', color: '#5B6B82' }}>
-                  {value}
-                </span>
-              )}
-            />
-          </PieChart>
-        </ResponsiveContainer>
-        {/* Center label */}
-        <div className="absolute inset-0 flex flex-col items-center
-                        justify-center pointer-events-none"
-             style={{ top: '-20px' }}>
-          <span className="text-2xl font-bold text-gray-800">
-            {reportStatusData.find(d => d.name === 'Report Complete')?.value || 0}
-          </span>
-          <span className="text-xs text-gray-400">Complete</span>
-        </div>
-      </div>
-    )}
-  </div>
-
-  {/* Payment Status Donut */}
-  <div className="bg-white rounded-2xl border border-gray-100
-                  shadow-sm p-6">
-    <div className="flex justify-between items-center mb-4">
-      <h3 className="font-semibold text-gray-700 text-sm uppercase
-                     tracking-wider">
-        Payment Status
-      </h3>
-      <span className="text-xs text-gray-400">
-        {data.total_grants} total
-      </span>
-    </div>
-    {paymentStatusData.length === 0 ? (
-      <div className="flex items-center justify-center h-48 text-gray-300 text-sm">
-        No data yet
-      </div>
-    ) : (
-      <div className="relative">
-        <ResponsiveContainer width="100%" height={220}>
-          <PieChart>
-            <Pie
-              data={paymentStatusData}
-              cx="50%"
-              cy="50%"
-              innerRadius={65}
-              outerRadius={95}
-              paddingAngle={4}
-              dataKey="value"
-              strokeWidth={0}
-            >
-              {paymentStatusData.map((entry, index) => (
-                <Cell
-                  key={index}
-                  fill={['#1D6FB8', '#E8A916', '#C0272D'][index % 3]}
-                />
-              ))}
-            </Pie>
-            <Tooltip
-              contentStyle={{
-                borderRadius: '8px',
-                border: 'none',
-                boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-                fontSize: '12px'
-              }}
-            />
-            <Legend
-              iconType="circle"
-              iconSize={8}
-              formatter={(value) => (
-                <span style={{ fontSize: '12px', color: '#5B6B82' }}>
-                  {value}
-                </span>
-              )}
-            />
-          </PieChart>
-        </ResponsiveContainer>
-        {/* Center label */}
-        <div className="absolute inset-0 flex flex-col items-center
-                        justify-center pointer-events-none"
-             style={{ top: '-20px' }}>
-          <span className="text-2xl font-bold text-gray-800">
-            {paymentStatusData.find(d => d.name === 'Complete')?.value || 0}
-          </span>
-          <span className="text-xs text-gray-400">Complete</span>
-        </div>
-      </div>
-    )}
-  </div>
 </div>
 
 {/* Shipping Status Bar Chart */}
@@ -573,36 +589,6 @@ function Dashboard({ session }) {
     </ResponsiveContainer>
   )}
 </div>
-
-                {/* Shipping Status Bar Chart */}
-                <div className="bg-white rounded-xl border border-gray-200 p-5 mb-6">
-                  <h3 className="font-semibold text-gray-700 mb-4"
-                      style={{ fontFamily: 'Georgia, serif' }}>
-                    Shipping Status
-                  </h3>
-                  {shippingData.length === 0 ? (
-                    <p className="text-gray-400 text-sm text-center py-8">
-                      No data yet
-                    </p>
-                  ) : (
-                    <ResponsiveContainer width="100%" height={250}>
-                        <BarChart data={shippingData} margin={{ top: 10, right: 30, left: 0, bottom: 5 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                        <XAxis dataKey="name" tick={{ fontSize: 12 }} />
-                        <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
-                        <Tooltip />
-                        <Bar dataKey="value" radius={[4, 4, 0, 0]}>
-                          {shippingData.map((_, index) => (
-                            <Cell
-                              key={index}
-                              fill={BAR_COLORS_SHIPPING[index % BAR_COLORS_SHIPPING.length]}
-                            />
-                          ))}
-                        </Bar>
-                      </BarChart>
-                    </ResponsiveContainer>
-                  )}
-                </div>
               </>
             )}
           </>
