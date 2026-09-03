@@ -23,6 +23,13 @@ app = FastAPI(
     description="Internal API for preparing and generating charity grant reports.",
 )
 
+import gc
+
+@app.middleware("http")
+async def cleanup_middleware(request, call_next):
+    response = await call_next(request)
+    gc.collect()  # Force garbage collection after each request
+    return response
 
 app.add_middleware(
     CORSMiddleware,
