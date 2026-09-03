@@ -24,20 +24,10 @@ app = FastAPI(
 )
 
 
-def _cors_origins() -> list[str]:
-    """Return explicitly configured browser origins for local and deployed use."""
-
-    configured_origin = os.getenv("FRONTEND_URL", "").strip()
-    origins = ["http://localhost:5173", "http://127.0.0.1:5173"]
-    if configured_origin:
-        origins.append(configured_origin.rstrip("/"))
-    return origins
-
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_cors_origins(),
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
