@@ -164,8 +164,8 @@ function Dashboard({ session }) {
     <div className="flex min-h-screen bg-gray-100">
 
       {/* ── Sidebar ───────────────────────────────────────────────── */}
-      <div className="w-56 flex-shrink-0 flex flex-col"
-           style={{ background: '#08325C' }}>
+        <div className="hidden md:flex w-56 flex-shrink-0 flex-col"
+        style={{ background: '#08325C' }}>
 
         {/* Brand */}
         <div className="px-5 py-6 border-b border-white border-opacity-10">
@@ -176,6 +176,7 @@ function Dashboard({ session }) {
             IHHN · FOIH
           </div>
         </div>
+        
 
         {/* Nav items */}
         <nav className="mt-3 flex-1">
@@ -214,7 +215,46 @@ function Dashboard({ session }) {
       </div>
 
       {/* ── Main Content ──────────────────────────────────────────── */}
-      <div className="flex-1 p-8 overflow-auto">
+            <div className="flex-1 overflow-auto">
+
+        {/* Mobile top navbar */}
+        <div className="md:hidden flex items-center justify-between px-4 py-3
+                        border-b border-gray-200 bg-white sticky top-0 z-10">
+          <div>
+            <div className="text-sm font-bold text-blue-900">
+              Grant Utilization Ledger
+            </div>
+            <div className="text-xs text-gray-400">IHHN · FOIH</div>
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setActiveNav('dashboard')}
+              className={`text-xs px-3 py-1.5 rounded-lg font-medium
+                ${activeNav === 'dashboard'
+                  ? 'bg-blue-700 text-white'
+                  : 'text-gray-500 border border-gray-200'}`}
+            >
+              Dashboard
+            </button>
+            <button
+              onClick={() => setActiveNav('records')}
+              className={`text-xs px-3 py-1.5 rounded-lg font-medium
+                ${activeNav === 'records'
+                  ? 'bg-blue-700 text-white'
+                  : 'text-gray-500 border border-gray-200'}`}
+            >
+              Records
+            </button>
+          </div>
+          <button
+            onClick={handleLogout}
+            className="text-xs text-red-500"
+          >
+            Sign out
+          </button>
+        </div>
+
+        <div className="p-4 md:p-8">
 
         {/* Dashboard View */}
         {activeNav === 'dashboard' && (
@@ -245,7 +285,7 @@ function Dashboard({ session }) {
               <>
                 {/* KPI Ribbon */}
                 <div className="bg-white rounded-xl border border-gray-200
-                                flex flex-wrap mb-6 overflow-hidden">
+                grid grid-cols-2 md:flex md:flex-wrap mb-6 overflow-hidden">
                   {[
                     {
                       label: 'TOTAL RECORDS',
@@ -1187,7 +1227,7 @@ function Dashboard({ session }) {
           </div>
         </div>
       )}
-
+</div>
       {/* ── Report Modal ──────────────────────────────────────────── */}
       {selectedGrant && (
         <div className="fixed inset-0 bg-black bg-opacity-40 flex
@@ -1316,5 +1356,6 @@ function Dashboard({ session }) {
     </div>
   )
 }
+
 
 export default Dashboard
