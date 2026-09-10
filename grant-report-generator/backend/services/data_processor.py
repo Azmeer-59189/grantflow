@@ -1,47 +1,48 @@
-"""Validate grant rows and calculate dashboard KPIs for 50-column structure."""
+"""Validate grant rows, auto-calculate report status, and compute KPIs."""
 
 from __future__ import annotations
 from dataclasses import asdict, dataclass
 import re
 from typing import Any
 
-# Snake case versions of all 50 column headers
-REQUIRED_FIELDS = {
-    "region",
-    "grant_number",
-    "supplier",
-    "item",
-    "currency",
-    "payment_status",
-    "report_status",
-}
-
-# Optional fields — can be blank
-OPTIONAL_FIELDS = {
-    "project_type", "department", "po_wo_number", "sub_grant_no",
-    "total_grant_amount_orig", "total_grant_amount_usd", "sub_grant_amount",
-    "current_payment_orig", "current_payment_usd", "remaining_payment",
-    "payment_reference", "grant_receiving_date", "grant_application_sent_date",
+# Required fields for report status calculation
+# If any of these are empty → Incomplete Information
+# If all filled but link_to_utilization_report empty → Pending
+# If all filled including link_to_utilization_report → Complete
+REQUIRED_FOR_STATUS = {
+    "country", "chapter", "grant_number", "project_type", "department",
+    "supplier", "item", "po_wo_number", "sub_grant_no",
+    "link_to_complete_documents", "secondary_currency",
+    "total_grant_amount_orig", "total_grant_amount_usd",
+    "current_payment_orig", "current_payment_usd",
+    "remaining_payment_orig", "remaining_payment_usd",
+    "payment_status", "payment_reference",
+    "grant_receiving_date", "grant_application_sent_date",
     "date_dr_zafar_signed_application", "date_of_approval_by_khaleeq_sb",
     "date_of_email_to_int_chapter", "payment_date",
+    "date_ceo_signed_application",
     "shipping_documents_status", "shipping_documents_comment",
-    "link_to_shipping_documents", "link_to_complete_documents",
-    "commercial_invoice_no", "bill_of_lading", "packing_list_reference",
-    "grn_receiving_status", "receiving_date", "grn_number", "link_to_grn",
-    "grn_receiving_comments", "installation_date", "location",
-    "building_name", "floor", "room", "item_model", "item_serial_number",
-    "quantity", "ihhn_asset_tag_number", "pictures_status", "pictures",
-    "poc_for_pictures", "no_of_beneficiaries",
-    "link_to_utilization_report", "item_description",
+    "link_to_shipping_documents", "commercial_invoice_no",
+    "bill_of_lading", "packing_list_reference",
+    "grn_receiving_status", "receiving_date", "grn_number",
+    "link_to_grn", "grn_receiving_comments", "installation_date",
+    "location", "building_name", "floor", "room",
+    "item_model", "item_serial_number", "quantity",
+    "ihhn_asset_tag_number", "department_for_pictures",
+    "picture", "pictures_status", "no_of_beneficiaries",
+    "item_description",
 }
 
 # Valid dropdown values
-VALID_REGIONS = {
-    "FOIH USA", "IDF Canada", "FOIH Germany",
-    "Indus Health UAE", "FOIH Australia"
+VALID_COUNTRIES = {
+    "United States", "Canada", "United Kingdom",
+    "Germany", "Switzerland", "UAE"
 }
-VALID_PROJECT_TYPES = {"Expansion", "Non-Expansion", ""}
-VALID_CURRENCIES = {"USD", "CAD", "EUR", "AED", "AUD", ""}
+VALID_CHAPTERS = {
+    "FOIHUS", "IDF", "TIH UAE", "IHN UK",
+    "FOIH Germany", "FOIH Switzerland"
+}
+VALID_SECONDARY_CURRENCIES = {"CAD", "EUR", "AED", "AUD", "GBP", ""}
 VALID_PAYMENT_STATUS = {"Pending", "Partial", "Complete"}
 VALID_SHIPPING_STATUS = {
     "Not received", "Received", "Received with discrepancy",
@@ -53,16 +54,6 @@ VALID_GRN_STATUS = {
     "Received with comments", "Not required", ""
 }
 VALID_PICTURES_STATUS = {"Yes", "No", "Consumable", "Not applicable", ""}
-VALID_REPORT_STATUS = {"Pending", "Report Complete"}
-
-# Currency per region
-REGION_CURRENCY = {
-    "FOIH USA": "USD",
-    "IDF Canada": "CAD",
-    "FOIH Germany": "EUR",
-    "Indus Health UAE": "AED",
-    "FOIH Australia": "AUD",
-}
 
 
 class GrantDataValidationError(ValueError):
@@ -70,7 +61,7 @@ class GrantDataValidationError(ValueError):
 
 
 def _parse_number(value: str, field_name: str, row_number: int) -> float:
-    """Parse a number from a string, stripping currency symbols."""
+    """Parse a number from a string."""
     if not str(value).strip():
         return 0.0
     cleaned = re.sub(r"[^0-9.\-]", "", str(value))
@@ -83,10 +74,37 @@ def _parse_number(value: str, field_name: str, row_number: int) -> float:
     return result
 
 
+def _calculate_report_status(row: dict) -> str:
+    """Auto-calculate report status based on filled fields.
+    
+    Complete: all fields filled including link_to_utilization_report
+    Pending: all fields filled except link_to_utilization_report
+    Incomplete Information: any required field is empty
+    """
+    # Check if link to utilization report is filled
+    has_report_link = bool(
+        str(row.get("link_to_utilization_report", "")).strip()
+    )
+
+    # Check if all required fields are filled
+    all_required_filled = all(
+        str(row.get(field, "")).strip()
+        for field in REQUIRED_FOR_STATUS
+    )
+
+    if all_required_filled and has_report_link:
+        return "Complete"
+    elif all_required_filled and not has_report_link:
+        return "Pending"
+    else:
+        return "Incomplete Information"
+
+
 @dataclass(frozen=True)
 class GrantRecord:
     """Represents one grant row from the sheet."""
-    region: str
+    country: str
+    chapter: str
     grant_number: str
     project_type: str
     department: str
@@ -94,13 +112,15 @@ class GrantRecord:
     item: str
     po_wo_number: str
     sub_grant_no: str
-    currency: str
+    link_to_complete_documents: str
+    secondary_currency: str
     total_grant_amount_orig: float
     total_grant_amount_usd: float
     sub_grant_amount: float
     current_payment_orig: float
     current_payment_usd: float
-    remaining_payment: float
+    remaining_payment_orig: float
+    remaining_payment_usd: float
     payment_status: str
     payment_reference: str
     grant_receiving_date: str
@@ -109,10 +129,10 @@ class GrantRecord:
     date_of_approval_by_khaleeq_sb: str
     date_of_email_to_int_chapter: str
     payment_date: str
+    date_ceo_signed_application: str
     shipping_documents_status: str
     shipping_documents_comment: str
     link_to_shipping_documents: str
-    link_to_complete_documents: str
     commercial_invoice_no: str
     bill_of_lading: str
     packing_list_reference: str
@@ -130,9 +150,9 @@ class GrantRecord:
     item_serial_number: str
     quantity: float
     ihhn_asset_tag_number: str
+    department_for_pictures: str
+    picture: str
     pictures_status: str
-    pictures: str
-    poc_for_pictures: str
     no_of_beneficiaries: float
     report_status: str
     link_to_utilization_report: str
@@ -165,47 +185,45 @@ class GrantSummary:
 
 def validate_grant_dict(grant: dict, is_new: bool = True) -> None:
     """Validate a grant dictionary before writing to sheet."""
-
     # Check required fields
-    for field in REQUIRED_FIELDS:
+    for field in ["country", "grant_number", "supplier", "item"]:
         if not str(grant.get(field, "")).strip():
             label = field.replace("_", " ").title()
             raise GrantDataValidationError(f"{label} is required.")
 
     # Validate dropdowns
-    if grant.get("region") not in VALID_REGIONS:
+    if grant.get("country") not in VALID_COUNTRIES:
         raise GrantDataValidationError(
-            f"Region must be one of: {', '.join(sorted(VALID_REGIONS))}"
+            f"Country must be one of: {', '.join(sorted(VALID_COUNTRIES))}"
         )
     if grant.get("payment_status") not in VALID_PAYMENT_STATUS:
         raise GrantDataValidationError(
             f"Payment Status must be one of: {', '.join(VALID_PAYMENT_STATUS)}"
         )
-    if grant.get("report_status") not in VALID_REPORT_STATUS:
-        raise GrantDataValidationError(
-            f"Report Status must be one of: {', '.join(VALID_REPORT_STATUS)}"
-        )
 
 
 def process_grant_rows(rows: list[dict[str, str]]) -> GrantSummary:
     """Process all grant rows from the sheet into a GrantSummary."""
-
     if not rows:
         return GrantSummary(
             grants=(), total_grants=0, total_paid_usd=0.0,
-            pending_reports=0, shipping_issues=0, total_grant_value_usd=0.0,
+            pending_reports=0, shipping_issues=0,
+            total_grant_value_usd=0.0,
         )
 
     grants: list[GrantRecord] = []
 
     for row_number, row in enumerate(rows, start=2):
-        # Skip rows where grant number is empty
         if not row.get("grant_number", "").strip():
             continue
 
+        # Auto calculate report status
+        report_status = _calculate_report_status(row)
+
         try:
             grants.append(GrantRecord(
-                region=row.get("region", "").strip(),
+                country=row.get("country", "").strip(),
+                chapter=row.get("chapter", "").strip(),
                 grant_number=row.get("grant_number", "").strip(),
                 project_type=row.get("project_type", "").strip(),
                 department=row.get("department", "").strip(),
@@ -213,7 +231,10 @@ def process_grant_rows(rows: list[dict[str, str]]) -> GrantSummary:
                 item=row.get("item", "").strip(),
                 po_wo_number=row.get("po_wo_number", "").strip(),
                 sub_grant_no=row.get("sub_grant_no", "").strip(),
-                currency=row.get("currency", "").strip(),
+                link_to_complete_documents=row.get(
+                    "link_to_complete_documents", ""
+                ).strip(),
+                secondary_currency=row.get("secondary_currency", "").strip(),
                 total_grant_amount_orig=_parse_number(
                     row.get("total_grant_amount_orig", "0"),
                     "Total Grant Amount (orig)", row_number
@@ -234,30 +255,60 @@ def process_grant_rows(rows: list[dict[str, str]]) -> GrantSummary:
                     row.get("current_payment_usd", "0"),
                     "Current Payment (USD)", row_number
                 ),
-                remaining_payment=_parse_number(
-                    row.get("remaining_payment", "0"),
-                    "Remaining Payment", row_number
+                remaining_payment_orig=_parse_number(
+                    row.get("remaining_payment_orig", "0"),
+                    "Remaining Payment (orig)", row_number
+                ),
+                remaining_payment_usd=_parse_number(
+                    row.get("remaining_payment_usd", "0"),
+                    "Remaining Payment (USD)", row_number
                 ),
                 payment_status=row.get("payment_status", "Pending").strip(),
                 payment_reference=row.get("payment_reference", "").strip(),
-                grant_receiving_date=row.get("grant_receiving_date", "").strip(),
-                grant_application_sent_date=row.get("grant_application_sent_date", "").strip(),
-                date_dr_zafar_signed_application=row.get("date_dr_zafar_signed_application", "").strip(),
-                date_of_approval_by_khaleeq_sb=row.get("date_of_approval_by_khaleeq_sb", "").strip(),
-                date_of_email_to_int_chapter=row.get("date_of_email_to_int_chapter", "").strip(),
+                grant_receiving_date=row.get(
+                    "grant_receiving_date", ""
+                ).strip(),
+                grant_application_sent_date=row.get(
+                    "grant_application_sent_date", ""
+                ).strip(),
+                date_dr_zafar_signed_application=row.get(
+                    "date_dr_zafar_signed_application", ""
+                ).strip(),
+                date_of_approval_by_khaleeq_sb=row.get(
+                    "date_of_approval_by_khaleeq_sb", ""
+                ).strip(),
+                date_of_email_to_int_chapter=row.get(
+                    "date_of_email_to_int_chapter", ""
+                ).strip(),
                 payment_date=row.get("payment_date", "").strip(),
-                shipping_documents_status=row.get("shipping_documents_status", "").strip(),
-                shipping_documents_comment=row.get("shipping_documents_comment", "").strip(),
-                link_to_shipping_documents=row.get("link_to_shipping_documents", "").strip(),
-                link_to_complete_documents=row.get("link_to_complete_documents", "").strip(),
-                commercial_invoice_no=row.get("commercial_invoice_no", "").strip(),
+                date_ceo_signed_application=row.get(
+                    "date_ceo_signed_application", ""
+                ).strip(),
+                shipping_documents_status=row.get(
+                    "shipping_documents_status", ""
+                ).strip(),
+                shipping_documents_comment=row.get(
+                    "shipping_documents_comment", ""
+                ).strip(),
+                link_to_shipping_documents=row.get(
+                    "link_to_shipping_documents", ""
+                ).strip(),
+                commercial_invoice_no=row.get(
+                    "commercial_invoice_no", ""
+                ).strip(),
                 bill_of_lading=row.get("bill_of_lading", "").strip(),
-                packing_list_reference=row.get("packing_list_reference", "").strip(),
-                grn_receiving_status=row.get("grn_receiving_status", "").strip(),
+                packing_list_reference=row.get(
+                    "packing_list_reference", ""
+                ).strip(),
+                grn_receiving_status=row.get(
+                    "grn_receiving_status", ""
+                ).strip(),
                 receiving_date=row.get("receiving_date", "").strip(),
                 grn_number=row.get("grn_number", "").strip(),
                 link_to_grn=row.get("link_to_grn", "").strip(),
-                grn_receiving_comments=row.get("grn_receiving_comments", "").strip(),
+                grn_receiving_comments=row.get(
+                    "grn_receiving_comments", ""
+                ).strip(),
                 installation_date=row.get("installation_date", "").strip(),
                 location=row.get("location", "").strip(),
                 building_name=row.get("building_name", "").strip(),
@@ -268,16 +319,22 @@ def process_grant_rows(rows: list[dict[str, str]]) -> GrantSummary:
                 quantity=_parse_number(
                     row.get("quantity", "0"), "Quantity", row_number
                 ),
-                ihhn_asset_tag_number=row.get("ihhn_asset_tag_number", "").strip(),
+                ihhn_asset_tag_number=row.get(
+                    "ihhn_asset_tag_number", ""
+                ).strip(),
+                department_for_pictures=row.get(
+                    "department_for_pictures", ""
+                ).strip(),
+                picture=row.get("picture", "").strip(),
                 pictures_status=row.get("pictures_status", "").strip(),
-                pictures=row.get("pictures", "").strip(),
-                poc_for_pictures=row.get("poc_for_pictures", "").strip(),
                 no_of_beneficiaries=_parse_number(
                     row.get("no_of_beneficiaries", "0"),
                     "No. of Beneficiaries", row_number
                 ),
-                report_status=row.get("report_status", "Pending").strip(),
-                link_to_utilization_report=row.get("link_to_utilization_report", "").strip(),
+                report_status=report_status,
+                link_to_utilization_report=row.get(
+                    "link_to_utilization_report", ""
+                ).strip(),
                 item_description=row.get("item_description", "").strip(),
             ))
         except GrantDataValidationError:
@@ -290,7 +347,8 @@ def process_grant_rows(rows: list[dict[str, str]]) -> GrantSummary:
     )
     total_grant_value_usd = sum(g.total_grant_amount_usd for g in grants)
     pending_reports = sum(
-        1 for g in grants if g.report_status == "Pending"
+        1 for g in grants
+        if g.report_status in ("Pending", "Incomplete Information")
     )
     shipping_issues = sum(
         1 for g in grants

@@ -40,7 +40,9 @@ class ReportSections(BaseModel):
 
 class GrantPayload(BaseModel):
     """What the frontend sends when creating or updating a grant."""
-    region: str
+    region: Optional[str] = ""
+    country: Optional[str] = ""
+    chapter: Optional[str] = ""
     grant_number: str
     project_type: Optional[str] = ""
     department: Optional[str] = ""
@@ -48,13 +50,15 @@ class GrantPayload(BaseModel):
     item: str
     po_wo_number: Optional[str] = ""
     sub_grant_no: Optional[str] = ""
-    currency: Optional[str] = ""
+    link_to_complete_documents: Optional[str] = ""
+    secondary_currency: Optional[str] = ""
     total_grant_amount_orig: Optional[float] = 0.0
     total_grant_amount_usd: Optional[float] = 0.0
     sub_grant_amount: Optional[float] = 0.0
     current_payment_orig: Optional[float] = 0.0
     current_payment_usd: Optional[float] = 0.0
-    remaining_payment: Optional[float] = 0.0
+    remaining_payment_orig: Optional[float] = 0.0
+    remaining_payment_usd: Optional[float] = 0.0
     payment_status: str = "Pending"
     payment_reference: Optional[str] = ""
     grant_receiving_date: Optional[str] = ""
@@ -63,10 +67,10 @@ class GrantPayload(BaseModel):
     date_of_approval_by_khaleeq_sb: Optional[str] = ""
     date_of_email_to_int_chapter: Optional[str] = ""
     payment_date: Optional[str] = ""
+    date_ceo_signed_application: Optional[str] = ""
     shipping_documents_status: Optional[str] = ""
     shipping_documents_comment: Optional[str] = ""
     link_to_shipping_documents: Optional[str] = ""
-    link_to_complete_documents: Optional[str] = ""
     commercial_invoice_no: Optional[str] = ""
     bill_of_lading: Optional[str] = ""
     packing_list_reference: Optional[str] = ""
@@ -84,11 +88,11 @@ class GrantPayload(BaseModel):
     item_serial_number: Optional[str] = ""
     quantity: Optional[float] = 0.0
     ihhn_asset_tag_number: Optional[str] = ""
+    department_for_pictures: Optional[str] = ""
+    picture: Optional[str] = ""
     pictures_status: Optional[str] = ""
-    pictures: Optional[str] = ""
-    poc_for_pictures: Optional[str] = ""
     no_of_beneficiaries: Optional[float] = 0.0
-    report_status: str = "Pending"
+    report_status: Optional[str] = "Incomplete Information"
     link_to_utilization_report: Optional[str] = ""
     item_description: Optional[str] = ""
 

@@ -1,15 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 
-// ── Constants ──────────────────────────────────────────────────────────────
-const REGION_CURRENCY = {
-  'FOIH USA': 'USD',
-  'IDF Canada': 'CAD',
-  'FOIH Germany': 'EUR',
-  'Indus Health UAE': 'AED',
-  'FOIH Australia': 'AUD',
-}
-
 // ── Field components — defined OUTSIDE so they never remount ───────────────
 const inputClass = `w-full border border-gray-300 rounded-lg px-4 py-2
   text-sm focus:outline-none focus:ring-2 focus:ring-blue-500`
@@ -147,6 +138,20 @@ function TextareaField({ name, label, value, onChange }) {
   )
 }
 
+function StatusBadge({ status }) {
+  const colors = {
+    'Complete': 'bg-blue-100 text-blue-700',
+    'Pending': 'bg-amber-100 text-amber-700',
+    'Incomplete Information': 'bg-red-100 text-red-700',
+  }
+  return (
+    <span className={`px-3 py-1 rounded-full text-xs font-medium
+                     ${colors[status] || 'bg-gray-100 text-gray-600'}`}>
+      {status}
+    </span>
+  )
+}
+
 // ── Main component ─────────────────────────────────────────────────────────
 function EditGrant() {
   const navigate = useNavigate()
@@ -159,63 +164,69 @@ function EditGrant() {
   const exchangeRateRef = useRef(1)
 
   const [form, setForm] = useState({
-    region: '',
-    grant_number: '',
-    project_type: '',
-    department: '',
-    supplier: '',
-    item: '',
-    po_wo_number: '',
-    sub_grant_no: '',
-    currency: '',
-    total_grant_amount_orig: '',
-    total_grant_amount_usd: '',
-    sub_grant_amount: '',
-    current_payment_orig: '',
-    current_payment_usd: '',
-    remaining_payment: '',
-    payment_status: 'Pending',
-    payment_reference: '',
-    grant_receiving_date: '',
-    grant_application_sent_date: '',
-    date_dr_zafar_signed_application: '',
-    date_of_approval_by_khaleeq_sb: '',
-    date_of_email_to_int_chapter: '',
-    payment_date: '',
-    shipping_documents_status: '',
-    shipping_documents_comment: '',
-    link_to_shipping_documents: '',
-    link_to_complete_documents: '',
-    commercial_invoice_no: '',
-    bill_of_lading: '',
-    packing_list_reference: '',
-    grn_receiving_status: '',
-    receiving_date: '',
-    grn_number: '',
-    link_to_grn: '',
-    grn_receiving_comments: '',
-    installation_date: '',
-    location: '',
-    building_name: '',
-    floor: '',
-    room: '',
-    item_model: '',
-    item_serial_number: '',
-    quantity: '',
-    ihhn_asset_tag_number: '',
-    pictures_status: '',
-    pictures: '',
-    poc_for_pictures: '',
-    no_of_beneficiaries: '',
-    report_status: 'Pending',
-    link_to_utilization_report: '',
-    item_description: '',
+    country: '', chapter: '', grant_number: '', project_type: '',
+    department: '', supplier: '', item: '', po_wo_number: '',
+    sub_grant_no: '', link_to_complete_documents: '',
+    secondary_currency: '', total_grant_amount_orig: '',
+    total_grant_amount_usd: '', sub_grant_amount: '',
+    current_payment_orig: '', current_payment_usd: '',
+    remaining_payment_orig: '', remaining_payment_usd: '',
+    payment_status: 'Pending', payment_reference: '',
+    grant_receiving_date: '', grant_application_sent_date: '',
+    date_dr_zafar_signed_application: '', date_of_approval_by_khaleeq_sb: '',
+    date_of_email_to_int_chapter: '', payment_date: '',
+    date_ceo_signed_application: '', shipping_documents_status: '',
+    shipping_documents_comment: '', link_to_shipping_documents: '',
+    commercial_invoice_no: '', bill_of_lading: '',
+    packing_list_reference: '', grn_receiving_status: '',
+    receiving_date: '', grn_number: '', link_to_grn: '',
+    grn_receiving_comments: '', installation_date: '', location: '',
+    building_name: '', floor: '', room: '', item_model: '',
+    item_serial_number: '', quantity: '', ihhn_asset_tag_number: '',
+    department_for_pictures: '', picture: '', pictures_status: '',
+    no_of_beneficiaries: '', report_status: 'Incomplete Information',
+    link_to_utilization_report: '', item_description: '',
   })
 
-  // Load existing grant data
+  function calcReportStatus(f) {
+    const requiredFields = [
+      'country', 'chapter', 'grant_number', 'project_type', 'department',
+      'supplier', 'item', 'po_wo_number', 'sub_grant_no',
+      'link_to_complete_documents', 'secondary_currency',
+      'total_grant_amount_orig', 'total_grant_amount_usd',
+      'current_payment_orig', 'current_payment_usd',
+      'payment_status', 'payment_reference',
+      'grant_receiving_date', 'grant_application_sent_date',
+      'date_dr_zafar_signed_application', 'date_of_approval_by_khaleeq_sb',
+      'date_of_email_to_int_chapter', 'payment_date',
+      'date_ceo_signed_application',
+      'shipping_documents_status', 'shipping_documents_comment',
+      'link_to_shipping_documents', 'commercial_invoice_no',
+      'bill_of_lading', 'packing_list_reference',
+      'grn_receiving_status', 'receiving_date', 'grn_number',
+      'link_to_grn', 'grn_receiving_comments', 'installation_date',
+      'location', 'building_name', 'floor', 'room',
+      'item_model', 'item_serial_number', 'quantity',
+      'ihhn_asset_tag_number', 'department_for_pictures',
+      'picture', 'pictures_status', 'no_of_beneficiaries',
+      'item_description',
+    ]
+    const allFilled = requiredFields.every(k => String(f[k] || '').trim())
+    const hasReportLink = String(f.link_to_utilization_report || '').trim()
+    if (allFilled && hasReportLink) return 'Complete'
+    if (allFilled && !hasReportLink) return 'Pending'
+    return 'Incomplete Information'
+  }
+
   useEffect(() => {
     fetchGrant()
   }, [])
+
+  useEffect(() => {
+    if (form.secondary_currency) {
+      loadExchangeRate(form.secondary_currency)
+    }
+  }, [form.secondary_currency])
 
   async function fetchGrant() {
     try {
@@ -225,9 +236,9 @@ function EditGrant() {
       const data = await response.json()
       if (!response.ok) throw new Error(data.detail || 'Grant not found')
 
-      // Pre-fill form with existing data
       setForm({
-        region: data.region || '',
+        country: data.country || '',
+        chapter: data.chapter || '',
         grant_number: data.grant_number || '',
         project_type: data.project_type || '',
         department: data.department || '',
@@ -235,13 +246,15 @@ function EditGrant() {
         item: data.item || '',
         po_wo_number: data.po_wo_number || '',
         sub_grant_no: data.sub_grant_no || '',
-        currency: data.currency || '',
+        link_to_complete_documents: data.link_to_complete_documents || '',
+        secondary_currency: data.secondary_currency || '',
         total_grant_amount_orig: data.total_grant_amount_orig || '',
         total_grant_amount_usd: data.total_grant_amount_usd || '',
         sub_grant_amount: data.sub_grant_amount || '',
         current_payment_orig: data.current_payment_orig || '',
         current_payment_usd: data.current_payment_usd || '',
-        remaining_payment: data.remaining_payment || '',
+        remaining_payment_orig: data.remaining_payment_orig || '',
+        remaining_payment_usd: data.remaining_payment_usd || '',
         payment_status: data.payment_status || 'Pending',
         payment_reference: data.payment_reference || '',
         grant_receiving_date: data.grant_receiving_date || '',
@@ -250,10 +263,10 @@ function EditGrant() {
         date_of_approval_by_khaleeq_sb: data.date_of_approval_by_khaleeq_sb || '',
         date_of_email_to_int_chapter: data.date_of_email_to_int_chapter || '',
         payment_date: data.payment_date || '',
+        date_ceo_signed_application: data.date_ceo_signed_application || '',
         shipping_documents_status: data.shipping_documents_status || '',
         shipping_documents_comment: data.shipping_documents_comment || '',
         link_to_shipping_documents: data.link_to_shipping_documents || '',
-        link_to_complete_documents: data.link_to_complete_documents || '',
         commercial_invoice_no: data.commercial_invoice_no || '',
         bill_of_lading: data.bill_of_lading || '',
         packing_list_reference: data.packing_list_reference || '',
@@ -271,18 +284,18 @@ function EditGrant() {
         item_serial_number: data.item_serial_number || '',
         quantity: data.quantity || '',
         ihhn_asset_tag_number: data.ihhn_asset_tag_number || '',
+        department_for_pictures: data.department_for_pictures || '',
+        picture: data.picture || '',
         pictures_status: data.pictures_status || '',
-        pictures: data.pictures || '',
-        poc_for_pictures: data.poc_for_pictures || '',
         no_of_beneficiaries: data.no_of_beneficiaries || '',
-        report_status: data.report_status || 'Pending',
+        report_status: data.report_status || 'Incomplete Information',
         link_to_utilization_report: data.link_to_utilization_report || '',
         item_description: data.item_description || '',
       })
 
-      // Load exchange rate for the grant's currency
-      await loadExchangeRate(data.currency || 'USD')
-
+      if (data.secondary_currency) {
+        await loadExchangeRate(data.secondary_currency)
+      }
     } catch (err) {
       setError(err.message)
     } finally {
@@ -293,11 +306,6 @@ function EditGrant() {
   async function loadExchangeRate(currency) {
     setRateLoading(true)
     try {
-      if (currency === 'USD') {
-        setExchangeRate(1)
-        exchangeRateRef.current = 1
-        return
-      }
       const res = await fetch(
         `https://open.er-api.com/v6/latest/${currency}`
       )
@@ -318,23 +326,27 @@ function EditGrant() {
     setForm(prev => {
       const updated = { ...prev, [name]: value }
 
-      // Auto calculate Total Grant Amount USD
       if (name === 'total_grant_amount_orig') {
         const usd = (parseFloat(value) || 0) * exchangeRateRef.current
         updated.total_grant_amount_usd = usd.toFixed(2)
-        const remaining = usd - (parseFloat(updated.current_payment_usd) || 0)
-        updated.remaining_payment = remaining.toFixed(2)
+        const remOrig = (parseFloat(value) || 0) -
+          (parseFloat(updated.current_payment_orig) || 0)
+        updated.remaining_payment_orig = remOrig.toFixed(2)
+        const remUsd = usd - (parseFloat(updated.current_payment_usd) || 0)
+        updated.remaining_payment_usd = remUsd.toFixed(2)
       }
 
-      // Auto calculate Current Payment USD
       if (name === 'current_payment_orig') {
         const usd = (parseFloat(value) || 0) * exchangeRateRef.current
         updated.current_payment_usd = usd.toFixed(2)
-        const remaining =
-          (parseFloat(updated.total_grant_amount_usd) || 0) - usd
-        updated.remaining_payment = remaining.toFixed(2)
+        const remOrig = (parseFloat(updated.total_grant_amount_orig) || 0) -
+          (parseFloat(value) || 0)
+        updated.remaining_payment_orig = remOrig.toFixed(2)
+        const remUsd = (parseFloat(updated.total_grant_amount_usd) || 0) - usd
+        updated.remaining_payment_usd = remUsd.toFixed(2)
       }
 
+      updated.report_status = calcReportStatus(updated)
       return updated
     })
   }
@@ -355,7 +367,8 @@ function EditGrant() {
             sub_grant_amount: parseFloat(form.sub_grant_amount) || 0,
             current_payment_orig: parseFloat(form.current_payment_orig) || 0,
             current_payment_usd: parseFloat(form.current_payment_usd) || 0,
-            remaining_payment: parseFloat(form.remaining_payment) || 0,
+            remaining_payment_orig: parseFloat(form.remaining_payment_orig) || 0,
+            remaining_payment_usd: parseFloat(form.remaining_payment_usd) || 0,
             quantity: parseFloat(form.quantity) || 0,
             no_of_beneficiaries: parseFloat(form.no_of_beneficiaries) || 0,
           }),
@@ -371,12 +384,13 @@ function EditGrant() {
     }
   }
 
-  // Shorthand to pass value and onChange
   const f = (name) => ({
     name,
     value: form[name],
     onChange: handleChange,
   })
+
+  const reportStatus = calcReportStatus(form)
 
   if (fetching) {
     return (
@@ -399,9 +413,9 @@ function EditGrant() {
               Fetching exchange rate...
             </span>
           )}
-          {!rateLoading && form.currency !== 'USD' && (
+          {!rateLoading && form.secondary_currency && (
             <span className="text-xs text-green-600 font-medium">
-              1 {form.currency} = {exchangeRate.toFixed(4)} USD
+              1 {form.secondary_currency} = {exchangeRate.toFixed(4)} USD
             </span>
           )}
           <button
@@ -414,10 +428,20 @@ function EditGrant() {
       </nav>
 
       <div className="max-w-4xl mx-auto px-6 py-8">
-        <h2 className="text-2xl font-bold text-gray-800 mb-1">Edit Grant</h2>
-        <p className="text-sm text-gray-500 mb-6">
-          Editing: <span className="font-mono text-blue-700">{grantNumber}</span>
-        </p>
+        <div className="flex justify-between items-center mb-6">
+          <div>
+            <h2 className="text-2xl font-bold text-gray-800">Edit Grant</h2>
+            <p className="text-sm text-gray-500 mt-1">
+              Editing: <span className="font-mono text-blue-700">
+                {grantNumber}
+              </span>
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-gray-500">Report Status:</span>
+            <StatusBadge status={reportStatus} />
+          </div>
+        </div>
 
         {error && (
           <div className="bg-red-50 text-red-600 text-sm p-3 rounded-lg mb-4">
@@ -431,10 +455,17 @@ function EditGrant() {
             {/* ── Basic Information ─────────────────────────────── */}
             <SectionHeader title="Basic Information" />
             <SelectField
-              {...f('region')} label="Region" required
+              {...f('country')} label="Country" required
               options={[
-                'FOIH USA', 'IDF Canada', 'FOIH Germany',
-                'Indus Health UAE', 'FOIH Australia'
+                'United States', 'Canada', 'United Kingdom',
+                'Germany', 'Switzerland', 'UAE'
+              ]}
+            />
+            <SelectField
+              {...f('chapter')} label="Chapter"
+              options={[
+                'FOIHUS', 'IDF', 'TIH UAE',
+                'IHN UK', 'FOIH Germany', 'FOIH Switzerland'
               ]}
             />
             <TextField
@@ -465,27 +496,37 @@ function EditGrant() {
               {...f('sub_grant_no')} label="Sub Grant No."
               placeholder="Sub grant number if applicable"
             />
+            <div className="col-span-2">
+              <LinkField
+                {...f('link_to_complete_documents')}
+                label="Link to Complete Documents (Grant Application, PO & Invoice)"
+              />
+            </div>
 
             {/* ── Financial Details ─────────────────────────────── */}
             <SectionHeader title="Financial Details" />
 
             <div>
-              <label className={labelClass}>Currency</label>
+              <label className={labelClass}>Primary Currency</label>
               <input
                 type="text"
-                value={form.currency}
+                value="USD"
                 readOnly
                 className={`${inputClass} bg-gray-50 text-gray-500 cursor-not-allowed`}
               />
               <p className="text-xs text-gray-400 mt-1">
-                Auto-set based on region
+                Always USD
               </p>
             </div>
 
+            <SelectField
+              {...f('secondary_currency')} label="Secondary Currency"
+              options={['CAD', 'EUR', 'AED', 'AUD', 'GBP']}
+            />
             <NumberField
               {...f('total_grant_amount_orig')}
-              label={`Total Grant Amount (${form.currency})`}
-              hint="USD value auto-calculates below"
+              label={`Total Grant Amount ${form.secondary_currency ? `(${form.secondary_currency})` : '(orig)'}`}
+              hint={form.secondary_currency ? "USD value auto-calculates" : "Select secondary currency first"}
             />
             <NumberField
               {...f('total_grant_amount_usd')}
@@ -496,33 +537,58 @@ function EditGrant() {
             />
             <NumberField
               {...f('current_payment_orig')}
-              label={`Current Payment (${form.currency})`}
-              hint="USD value auto-calculates below"
+              label={`Current Payment ${form.secondary_currency ? `(${form.secondary_currency})` : '(orig)'}`}
+              hint={form.secondary_currency ? "USD value auto-calculates" : "Select secondary currency first"}
             />
             <NumberField
               {...f('current_payment_usd')}
               label="Current Payment (USD)" readOnly
             />
             <NumberField
-              {...f('remaining_payment')}
+              {...f('remaining_payment_orig')}
+              label={`Remaining Payment ${form.secondary_currency ? `(${form.secondary_currency})` : '(orig)'}`}
+              readOnly
+            />
+            <NumberField
+              {...f('remaining_payment_usd')}
               label="Remaining Payment (USD)" readOnly
             />
             <SelectField
               {...f('payment_status')} label="Payment Status" required
               options={['Pending', 'Partial', 'Complete']}
             />
-            <TextField
-              {...f('payment_reference')} label="Payment Reference"
-              placeholder="Reference number or note"
-            />
+            <div className="col-span-2">
+              <LinkField
+                {...f('payment_reference')}
+                label="Payment Reference (Attachment Link)"
+              />
+            </div>
 
             {/* ── Key Dates ─────────────────────────────────────── */}
             <SectionHeader title="Key Dates" />
-            <DateField {...f('grant_receiving_date')} label="Grant Receiving Date" />
-            <DateField {...f('grant_application_sent_date')} label="Grant Application Sent Date" />
-            <DateField {...f('date_dr_zafar_signed_application')} label="Date Dr. Zafar Signed Application" />
-            <DateField {...f('date_of_approval_by_khaleeq_sb')} label="Date of Approval by Khaleeq Sb" />
-            <DateField {...f('date_of_email_to_int_chapter')} label="Date of Email to Int. Chapter" />
+            <DateField
+              {...f('grant_receiving_date')} label="Grant Receiving Date"
+            />
+            <DateField
+              {...f('grant_application_sent_date')}
+              label="Grant Application Sent Date"
+            />
+            <DateField
+              {...f('date_dr_zafar_signed_application')}
+              label="Date Dr. Zafar Signed Application"
+            />
+            <DateField
+              {...f('date_ceo_signed_application')}
+              label="Date CEO Signed Application"
+            />
+            <DateField
+              {...f('date_of_approval_by_khaleeq_sb')}
+              label="Date of Approval by Khaleeq Sb"
+            />
+            <DateField
+              {...f('date_of_email_to_int_chapter')}
+              label="Date of Email to Int. Chapter"
+            />
             <DateField {...f('payment_date')} label="Payment Date" />
 
             {/* ── Shipping & Documents ──────────────────────────── */}
@@ -539,7 +605,8 @@ function EditGrant() {
               ]}
             />
             <TextField
-              {...f('commercial_invoice_no')} label="Commercial Invoice No."
+              {...f('commercial_invoice_no')}
+              label="Commercial Invoice No."
               placeholder="Invoice number"
             />
             <TextField
@@ -547,7 +614,8 @@ function EditGrant() {
               placeholder="Bill of lading reference"
             />
             <TextField
-              {...f('packing_list_reference')} label="Packing List Reference"
+              {...f('packing_list_reference')}
+              label="Packing List Reference"
               placeholder="Packing list reference"
             />
             <div className="col-span-2">
@@ -562,17 +630,12 @@ function EditGrant() {
                 label="Link to Shipping Documents"
               />
             </div>
-            <div className="col-span-2">
-              <LinkField
-                {...f('link_to_complete_documents')}
-                label="Link to Complete Documents"
-              />
-            </div>
 
             {/* ── GRN / Receiving ───────────────────────────────── */}
             <SectionHeader title="GRN / Receiving" />
             <SelectField
-              {...f('grn_receiving_status')} label="GRN / Receiving Status"
+              {...f('grn_receiving_status')}
+              label="GRN / Receiving Status"
               options={[
                 'Not received', 'Received',
                 'Received with comments', 'Not required'
@@ -595,7 +658,9 @@ function EditGrant() {
 
             {/* ── Installation & Location ───────────────────────── */}
             <SectionHeader title="Installation & Location" />
-            <DateField {...f('installation_date')} label="Installation Date" />
+            <DateField
+              {...f('installation_date')} label="Installation Date"
+            />
             <TextField
               {...f('location')} label="Location"
               placeholder="e.g. Karachi Campus"
@@ -604,8 +669,14 @@ function EditGrant() {
               {...f('building_name')} label="Building Name"
               placeholder="Building name"
             />
-            <TextField {...f('floor')} label="Floor" placeholder="Floor number or name" />
-            <TextField {...f('room')} label="Room" placeholder="Room number or name" />
+            <TextField
+              {...f('floor')} label="Floor"
+              placeholder="Floor number or name"
+            />
+            <TextField
+              {...f('room')} label="Room"
+              placeholder="Room number or name"
+            />
 
             {/* ── Item Details ──────────────────────────────────── */}
             <SectionHeader title="Item Details" />
@@ -619,11 +690,14 @@ function EditGrant() {
             />
             <NumberField {...f('quantity')} label="Quantity" />
             <TextField
-              {...f('ihhn_asset_tag_number')} label="IHHN Asset Tag Number"
+              {...f('ihhn_asset_tag_number')}
+              label="IHHN Asset Tag Number"
               placeholder="Asset tag number"
             />
             <div className="col-span-2">
-              <TextareaField {...f('item_description')} label="Item Description" />
+              <TextareaField
+                {...f('item_description')} label="Item Description"
+              />
             </div>
 
             {/* ── Pictures ──────────────────────────────────────── */}
@@ -633,20 +707,30 @@ function EditGrant() {
               options={['Yes', 'No', 'Consumable', 'Not applicable']}
             />
             <TextField
-              {...f('poc_for_pictures')} label="POC for Pictures"
-              placeholder="Point of contact name"
+              {...f('department_for_pictures')}
+              label="Department for Pictures"
+              placeholder="Department name"
             />
             <div className="col-span-2">
-              <LinkField {...f('pictures')} label="Pictures Link" />
+              <LinkField
+                {...f('picture')} label="Picture (Google Drive Link)"
+              />
             </div>
 
             {/* ── Report ────────────────────────────────────────── */}
             <SectionHeader title="Report" />
-            <NumberField {...f('no_of_beneficiaries')} label="No. of Beneficiaries" />
-            <SelectField
-              {...f('report_status')} label="Report Status" required
-              options={['Pending', 'Report Complete']}
+            <NumberField
+              {...f('no_of_beneficiaries')} label="No. of Beneficiaries"
             />
+            <div>
+              <label className={labelClass}>Report Status</label>
+              <div className="mt-2">
+                <StatusBadge status={reportStatus} />
+                <p className="text-xs text-gray-400 mt-1">
+                  Auto-calculated based on filled fields
+                </p>
+              </div>
+            </div>
             <div className="col-span-2">
               <LinkField
                 {...f('link_to_utilization_report')}
