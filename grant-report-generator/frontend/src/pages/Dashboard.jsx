@@ -1,14 +1,29 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../supabase'
 import {
   PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer,
   BarChart, Bar, XAxis, YAxis, CartesianGrid, LabelList,
-  LineChart, Line, ComposedChart, Area
+  ComposedChart, Area
 } from 'recharts'
+import {
+  ComposableMap, Geographies, Geography, ZoomableGroup
+} from 'react-simple-maps'
 
 const CHAPTERS = ['FOIHUS', 'IDF', 'TIH UAE', 'IHN UK', 'FOIH Germany', 'FOIH Switzerland']
 const COUNTRIES = ['United States', 'Canada', 'United Kingdom', 'Germany', 'Switzerland', 'UAE']
+// Map country names to ISO codes for react-simple-maps
+const COUNTRY_ISO = {
+  'United States': 'USA',
+  'Canada': 'CAN',
+  'United Kingdom': 'GBR',
+  'Germany': 'DEU',
+  'Switzerland': 'CHE',
+  'UAE': 'ARE',
+}
+
+const GEO_URL = 'https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json'
+
 
 function Dashboard({ session }) {
   const navigate = useNavigate()
@@ -20,6 +35,8 @@ function Dashboard({ session }) {
   const [detailGrant, setDetailGrant] = useState(null)
   const [activeNav, setActiveNav] = useState('dashboard')
   const [activeChapter, setActiveChapter] = useState('')
+  const [mapZoom, setMapZoom] = useState({ coordinates: [10, 30], zoom: 1 })
+  const [mapTooltip, setMapTooltip] = useState(null)
   const [selectedSections, setSelectedSections] = useState({
     overview: true, financial: true, dates: true,
     shipping: true, grn: true, location: true,
@@ -580,6 +597,193 @@ function Dashboard({ session }) {
                       )}
                     </div>
                   </div>
+
+                  {/* World Map */}
+<div className="bg-white rounded-2xl border border-gray-100
+                shadow-sm p-6 mb-6">
+  <div className="flex justify-between items-center mb-4">
+    <div>
+      <h3 className="font-bold text-gray-800 text-sm">
+        Deployment Sites
+      </h3>
+      <p className="text-xs text-gray-400 mt-0.5">
+        Grant activity by country — scroll to zoom, drag to pan
+      </p>
+    </div>
+    <button
+      onClick={() => setMapZoom({ coordinates: [0, 20], zoom: 1 })}
+      className="text-xs text-gray-400 hover:text-gray-600 border
+                 border-gray-200 px-3 py-1.5 rounded-lg transition"
+    >
+      Reset view
+    </button>
+  </div>
+
+  {(() => {
+    // Calculate total grant value per country
+    const countryValues = {}
+    const countryGrantCounts = {}
+    const countryChapters = {}
+
+    filteredGrants.forEach(g => {
+      const country = g.country || 'Unknown'
+      const value = parseFloat(g.total_grant_amount_usd) || 0
+      countryValues[country] = (countryValues[country] || 0) + value
+      countryGrantCounts[country] = (countryGrantCounts[country] || 0) + 1
+      if (!countryChapters[country]) countryChapters[country] = new Set()
+      if (g.chapter) countryChapters[country].add(g.chapter)
+    })
+
+    const maxValue = Math.max(...Object.values(countryValues), 1)
+
+    function getCountryColor(geoName) {
+      // Match geo name to our country names
+      const nameMap = {
+        'United States of America': 'United States',
+        'United Kingdom': 'United Kingdom',
+        'Germany': 'Germany',
+        'Switzerland': 'Switzerland',
+        'United Arab Emirates': 'UAE',
+        'Canada': 'Canada',
+      }
+      const ourName = nameMap[geoName]
+      if (!ourName) return '#E8EDF2'
+
+      // If chapter filter active, only highlight matching country
+      if (activeChapter) {
+        const chapters = countryChapters[ourName]
+        if (!chapters || !chapters.has(activeChapter)) return '#E8EDF2'
+      }
+
+      const value = countryValues[ourName] || 0
+      if (value === 0) return '#B8C9D9'
+
+      // Intensity based on value
+      const intensity = value / maxValue
+      if (intensity > 0.7) return '#08325C'
+      if (intensity > 0.4) return '#0B4C8C'
+      if (intensity > 0.1) return '#1D6FB8'
+      return '#6FA8D4'
+    }
+
+    return (
+      <div className="relative" style={{ height: '400px' }}>
+        <ComposableMap
+          projection="geoMercator"
+          projectionConfig={{ scale: 130, center: [10, 30] }}
+          style={{ width: '100%', height: '100%' }}
+        >
+          <ZoomableGroup
+            zoom={mapZoom.zoom}
+            center={mapZoom.coordinates}
+            onMoveEnd={({ coordinates, zoom }) =>
+              setMapZoom({ coordinates, zoom })
+            }
+            minZoom={0.5}
+            maxZoom={8}
+          >
+            <Geographies geography={GEO_URL}>
+              {({ geographies }) =>
+                geographies.map(geo => {
+                  const geoName = geo.properties.name
+                  const color = getCountryColor(geoName)
+                  const nameMap = {
+                    'United States of America': 'United States',
+                    'United Kingdom': 'United Kingdom',
+                    'Germany': 'Germany',
+                    'Switzerland': 'Switzerland',
+                    'United Arab Emirates': 'UAE',
+                    'Canada': 'Canada',
+                  }
+                  const ourName = nameMap[geoName]
+                  const isHighlighted = ourName &&
+                    countryValues[ourName] !== undefined
+
+                  return (
+                    <Geography
+                      key={geo.rsmKey}
+                      geography={geo}
+                      fill={color}
+                      stroke="#FFFFFF"
+                      strokeWidth={0.5}
+                      style={{
+                        default: { outline: 'none' },
+                        hover: {
+                          fill: isHighlighted ? '#E8A916' : '#D1D9E0',
+                          outline: 'none',
+                          cursor: isHighlighted ? 'pointer' : 'default'
+                        },
+                        pressed: { outline: 'none' }
+                      }}
+                      onMouseEnter={() => {
+                        if (ourName && countryGrantCounts[ourName]) {
+                          setMapTooltip({
+                            name: ourName,
+                            grants: countryGrantCounts[ourName],
+                            value: countryValues[ourName] || 0,
+                            chapters: countryChapters[ourName]
+                              ? [...countryChapters[ourName]].join(', ')
+                              : '—'
+                          })
+                        }
+                      }}
+                      onMouseLeave={() => setMapTooltip(null)}
+                    />
+                  )
+                })
+              }
+            </Geographies>
+          </ZoomableGroup>
+        </ComposableMap>
+
+        {/* Tooltip */}
+        {mapTooltip && (
+          <div className="absolute top-4 right-4 bg-white rounded-xl
+                          shadow-lg border border-gray-100 p-4 min-w-48
+                          pointer-events-none">
+            <p className="font-bold text-blue-900 text-sm mb-1">
+              {mapTooltip.name}
+            </p>
+            <p className="text-xs text-gray-500 mb-0.5">
+              Chapter: {mapTooltip.chapters}
+            </p>
+            <p className="text-xs text-gray-500 mb-0.5">
+              Grants: <span className="font-semibold text-gray-700">
+                {mapTooltip.grants}
+              </span>
+            </p>
+            <p className="text-xs text-gray-500">
+              Total Value: <span className="font-semibold text-blue-700">
+                ${mapTooltip.value.toLocaleString(undefined, {
+                  maximumFractionDigits: 0
+                })}
+              </span>
+            </p>
+          </div>
+        )}
+
+        {/* Legend */}
+        <div className="absolute bottom-4 left-4 flex items-center gap-2">
+          <div className="flex items-center gap-1">
+            <div className="w-3 h-3 rounded-sm"
+                 style={{ background: '#6FA8D4' }}></div>
+            <span className="text-xs text-gray-400">Low</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <div className="w-3 h-3 rounded-sm"
+                 style={{ background: '#1D6FB8' }}></div>
+            <span className="text-xs text-gray-400">Medium</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <div className="w-3 h-3 rounded-sm"
+                 style={{ background: '#08325C' }}></div>
+            <span className="text-xs text-gray-400">High</span>
+          </div>
+        </div>
+      </div>
+    )
+  })()}
+</div>
 
                   {/* Records by Country Bar Chart */}
                   <div className="bg-white rounded-2xl border border-gray-100
