@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import FileUploadField from '../components/FileUploadField'
 import { useNavigate, useParams } from 'react-router-dom'
 
 // ── Field components — defined OUTSIDE so they never remount ───────────────
@@ -558,9 +559,12 @@ function EditGrant() {
               options={['Pending', 'Partial', 'Complete']}
             />
             <div className="col-span-2">
-              <LinkField
-                {...f('payment_reference')}
-                label="Payment Reference (Attachment Link)"
+              <FileUploadField
+                name="payment_reference"
+                label="Payment Reference (Attachment)"
+                value={form.payment_reference}
+                onChange={handleChange}
+                folder="payment-references"
               />
             </div>
 
@@ -712,8 +716,12 @@ function EditGrant() {
               placeholder="Department name"
             />
             <div className="col-span-2">
-              <LinkField
-                {...f('picture')} label="Picture (Google Drive Link)"
+              <FileUploadField
+                name="picture"
+                label="Picture / Attachment"
+                value={form.picture}
+                onChange={handleChange}
+                folder="pictures"
               />
             </div>
 

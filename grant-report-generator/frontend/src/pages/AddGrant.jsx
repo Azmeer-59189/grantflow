@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import FileUploadField from '../components/FileUploadField'
 import { useNavigate } from 'react-router-dom'
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -525,9 +526,12 @@ async function handleSubmit() {
               options={['Pending', 'Partial', 'Complete']}
             />
             <div className="col-span-2">
-              <LinkField
-                {...f('payment_reference')}
-                label="Payment Reference (Attachment Link)"
+              <FileUploadField
+                name="payment_reference"
+                label="Payment Reference (Attachment)"
+                value={form.payment_reference}
+                onChange={handleChange}
+                folder="payment-references"
               />
             </div>
 
@@ -679,9 +683,12 @@ async function handleSubmit() {
               placeholder="Department name"
             />
             <div className="col-span-2">
-              <LinkField
-                {...f('picture')}
-                label="Picture (Google Drive Link)"
+              <FileUploadField
+                name="picture"
+                label="Picture / Attachment"
+                value={form.picture}
+                onChange={handleChange}
+                folder="pictures"
               />
             </div>
 
