@@ -19,3 +19,6 @@ python-docx
 
 # Verify Supabase JWT access tokens in the FastAPI backend.
 PyJWT[crypto]
+
+docxtpl
+docx2pdf

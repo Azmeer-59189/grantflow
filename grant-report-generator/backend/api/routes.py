@@ -28,6 +28,13 @@ from services.sheets_writer import (
 )
 from services.word_generator import create_word_report
 
+from services.template_report import (
+    TemplateReportError,
+    convert_docx_to_pdf,
+    create_template_word_report,
+    has_template,
+)
+
 
 router = APIRouter(prefix="/api", tags=["Grants"])
 REPORTS_DIR = Path(__file__).resolve().parents[1] / "generated_reports"
@@ -186,55 +193,68 @@ def edit_grant(grant_number: str, payload: GrantPayload) -> dict:
     }
 
 
-# ── POST /api/reports/pdf/{grant_number} ─────────────────────────────────────
+# ── POST /api/reports/pdf & word/{grant_number} ─────────────────────────────────────
 @router.post("/reports/pdf/{grant_number}")
-def download_pdf(
-    grant_number: str,
-    payload: ReportSections = None
-) -> FileResponse:
+def download_pdf(grant_number: str, payload: ReportSections = None) -> FileResponse:
     grant = _get_single_grant(grant_number)
     sections = payload.sections if payload else {}
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     output_path = REPORTS_DIR / f"grant-{grant_number}-{timestamp}.pdf"
-    try:
-        create_pdf_report(grant, output_path, sections=sections)
-    except Exception as error:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Could not generate PDF: {error}"
-        ) from error
 
-    return FileResponse(
-        output_path,
-        media_type="application/pdf",
-        filename=output_path.name
-    )
+    if has_template(grant.get("chapter", "")):
+        docx_path = REPORTS_DIR / f"grant-{grant_number}-{timestamp}.docx"
+        try:
+            create_template_word_report(grant, docx_path)
+            convert_docx_to_pdf(docx_path, output_path)
+        except TemplateReportError as error:
+            raise HTTPException(status_code=503, detail=str(error)) from error
+    else:
+        try:
+            create_pdf_report(grant, output_path, sections=sections)
+        except Exception as error:
+            raise HTTPException(status_code=500, detail=f"Could not generate PDF: {error}") from error
+
+    return FileResponse(output_path, media_type="application/pdf", filename=output_path.name)
 
 
-# ── POST /api/reports/word/{grant_number} ────────────────────────────────────
 @router.post("/reports/word/{grant_number}")
-def download_word(
-    grant_number: str,
-    payload: ReportSections = None
-) -> FileResponse:
-    """Generate and download a Word report for one specific grant."""
+def download_word(grant_number: str, payload: ReportSections = None) -> FileResponse:
     grant = _get_single_grant(grant_number)
-    sections = payload.model_dump() if payload else {}
+    sections = payload.sections if payload else {}
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     output_path = REPORTS_DIR / f"grant-{grant_number}-{timestamp}.docx"
+    ...
 
     try:
-        create_word_report(grant, output_path, sections=sections)
+        if has_template(grant.get("chapter", "")):
+            create_template_word_report(grant, output_path)
+        else:
+            create_word_report(grant, output_path, sections=sections)
+    except TemplateReportError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
     except Exception as error:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Could not generate Word report: {error}"
-        ) from error
+        raise HTTPException(status_code=500, detail=f"Could not generate Word report: {error}") from error
 
     return FileResponse(
         output_path,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        filename=output_path.name
+        filename=output_path.name,
+    )
+
+    try:
+        if has_template(grant.get("chapter", "")):
+            create_template_word_report(grant, output_path)
+        else:
+            create_word_report(grant, output_path, sections=sections)
+    except TemplateReportError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=f"Could not generate Word report: {error}") from error
+
+    return FileResponse(
+        output_path,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        filename=output_path.name,
     )
