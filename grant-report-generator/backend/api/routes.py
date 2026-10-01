@@ -136,12 +136,6 @@ def get_grant(grant_number: str) -> dict:
 # ── POST /api/grants ─────────────────────────────────────────────────────────
 @router.post("/grants", status_code=201)
 def add_grant(payload: GrantPayload) -> dict:
-    grant_data = payload.model_dump()
-
-    print("GRANT DATA:", grant_data)
-    
-@router.post("/grants", status_code=201)
-def add_grant(payload: GrantPayload) -> dict:
     """Add a new grant row to the Google Sheet."""
     grant_data = payload.model_dump()
 
