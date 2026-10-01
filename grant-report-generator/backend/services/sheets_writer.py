@@ -1,4 +1,4 @@
-"""Write grant rows to the team's Google Sheet — 54 column structure."""
+"""Write grant rows to the team's Google Sheet — 55 column structure."""
 
 import json
 import os
@@ -16,7 +16,7 @@ SHEETS_WRITE_SCOPE = "https://www.googleapis.com/auth/spreadsheets"
 
 # Column order must match sheet exactly
 COLUMN_ORDER = [
-    "Country", "Chapter", "Grant Number", "Project Type", "Department",
+    "Year", "Country", "Chapter", "Grant Number", "Project Type", "Department",
     "Supplier", "Item", "PO / WO Number", "Sub Grant No.",
     "Link to Complete Documents",
     "Secondary Currency", "Total Grant Amount (orig)",
@@ -43,7 +43,8 @@ COLUMN_ORDER = [
     "Link to Utilization Report", "Item Description",
 ]
 
-LAST_COLUMN = "BB"  # 54 columns = BB
+LAST_COLUMN = "BC"  # 55 columns = BC
+GRANT_NUMBER_COL = chr(ord("A") + COLUMN_ORDER.index("Grant Number"))  # "D"
 DEFAULT_TAB_NAME = os.getenv("GOOGLE_SHEET_TAB", "Grants")
 
 
@@ -90,6 +91,7 @@ def _get_write_credentials() -> Credentials:
 def _grant_to_row(grant: dict) -> list:
     """Convert grant dictionary to flat list matching column order."""
     return [
+        grant.get("year", ""),
         grant.get("country", ""),
         grant.get("chapter", ""),
         grant.get("grant_number", ""),
@@ -165,7 +167,7 @@ def append_grant(grant: dict, tab_name: str = DEFAULT_TAB_NAME) -> None:
         )
         service.spreadsheets().values().append(
             spreadsheetId=sheet_id,
-            range=f"{tab_name}!A:{LAST_COLUMN}",
+            range=f"{tab_name}!{GRANT_NUMBER_COL}:{GRANT_NUMBER_COL}",
             valueInputOption="USER_ENTERED",
             insertDataOption="INSERT_ROWS",
             body={"values": [row_values]}
@@ -182,6 +184,7 @@ def update_grant(
     grant: dict,
     tab_name: str = DEFAULT_TAB_NAME
 ) -> None:
+
     """Find an existing grant by Grant Number and update its row."""
     sheet_id = os.getenv("GOOGLE_SHEET_ID")
     if not sheet_id:
@@ -196,10 +199,10 @@ def update_grant(
             cache_discovery=False
         )
 
-        # Grant Number is now column C
+        # Grant Number is column D (Year is column A)
         response = service.spreadsheets().values().get(
             spreadsheetId=sheet_id,
-            range=f"{tab_name}!C:C"
+            range=f"{tab_name}!{GRANT_NUMBER_COL}:{GRANT_NUMBER_COL}"
         ).execute()
 
         all_grant_numbers = response.get("values", [])
@@ -250,11 +253,14 @@ def check_grant_number_exists(
             cache_discovery=False
         )
 
-        # Grant Number is now column C
+        # Grant Number column (derived from COLUMN_ORDER)
         response = service.spreadsheets().values().get(
             spreadsheetId=sheet_id,
-            range=f"{tab_name}!C:C"
+            range=f"{tab_name}!{GRANT_NUMBER_COL}:{GRANT_NUMBER_COL}"
         ).execute()
+
+        all_grant_numbers = response.get("values", [])
+        row_index = None
 
         all_values = response.get("values", [])
 

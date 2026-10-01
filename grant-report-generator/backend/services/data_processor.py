@@ -103,6 +103,7 @@ def _calculate_report_status(row: dict) -> str:
 @dataclass(frozen=True)
 class GrantRecord:
     """Represents one grant row from the sheet."""
+    year: str
     country: str
     chapter: str
     grant_number: str
@@ -191,6 +192,11 @@ def validate_grant_dict(grant: dict, is_new: bool = True) -> None:
             label = field.replace("_", " ").title()
             raise GrantDataValidationError(f"{label} is required.")
 
+    # Validate year (optional, but must be a 4-digit year if given)
+    year = str(grant.get("year", "")).strip()
+    if year and not re.fullmatch(r"20\d{2}", year):
+        raise GrantDataValidationError("Year must be a 4-digit year, e.g. 2025.")
+
     # Validate dropdowns
     if grant.get("country") not in VALID_COUNTRIES:
         raise GrantDataValidationError(
@@ -222,6 +228,7 @@ def process_grant_rows(rows: list[dict[str, str]]) -> GrantSummary:
 
         try:
             grants.append(GrantRecord(
+                year=row.get("year", "").strip(),
                 country=row.get("country", "").strip(),
                 chapter=row.get("chapter", "").strip(),
                 grant_number=row.get("grant_number", "").strip(),

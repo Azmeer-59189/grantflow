@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom'
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const INITIAL_FORM = {
+  year: '',
   country: '',
   chapter: '',
   grant_number: '',
@@ -221,7 +222,7 @@ function AddGrant() {
   // Calculate report status on the fly for preview
   function calcReportStatus(f) {
     const requiredFields = [
-      'country', 'chapter', 'grant_number', 'project_type', 'department',
+      'year', 'country', 'chapter', 'grant_number', 'project_type', 'department',
       'supplier', 'item', 'po_wo_number', 'sub_grant_no',
       'link_to_complete_documents', 'secondary_currency',
       'total_grant_amount_orig', 'total_grant_amount_usd',
@@ -414,6 +415,12 @@ async function handleSubmit() {
 
             {/* ── Basic Information ─────────────────────────────── */}
             <SectionHeader title="Basic Information" />
+            <TextField
+              {...f('year')}
+              label="Year"
+              required
+              placeholder="e.g. 2026"
+            />
             <SelectField
               {...f('country')} label="Country" required
               options={[
