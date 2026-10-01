@@ -9,7 +9,8 @@ from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
+_PARENTS = Path(__file__).resolve().parents
+PROJECT_ROOT = _PARENTS[3] if len(_PARENTS) > 3 else _PARENTS[1]
 load_dotenv(PROJECT_ROOT / ".env")
 
 SHEETS_WRITE_SCOPE = "https://www.googleapis.com/auth/spreadsheets"
