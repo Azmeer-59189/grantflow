@@ -14,7 +14,7 @@ import os
 import shutil
 import subprocess
 import tempfile
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from docxtpl import DocxTemplate, RichText
@@ -70,6 +70,14 @@ def _fmt_date(value) -> str:
     text = str(value or "").strip()
     if not text:
         return ""
+    # Google Sheets date serial numbers (e.g. 46296 -> October 1, 2026)
+    try:
+        serial = float(text)
+        if 20000 < serial < 80000:
+            parsed = datetime(1899, 12, 30) + timedelta(days=int(serial))
+            return f"{parsed.strftime('%B')} {parsed.day}, {parsed.year}"
+    except ValueError:
+        pass
     for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y", "%d-%m-%Y", "%d %b %Y", "%d %B %Y"):
         try:
             parsed = datetime.strptime(text, fmt)
@@ -185,19 +193,11 @@ def pdf_conversion_available() -> bool:
 
 
 def convert_docx_to_pdf(docx_path: Path, pdf_path: Path) -> Path:
-    """Convert a .docx to PDF with headless LibreOffice (or MS Word locally)."""
+    """Convert a .docx to PDF with headless LibreOffice."""
     soffice = _find_soffice()
     if soffice is None:
-        try:
-            from docx2pdf import convert   # local Windows only, needs MS Word
-            pdf_path.parent.mkdir(parents=True, exist_ok=True)
-            convert(str(docx_path), str(pdf_path))
-            if pdf_path.is_file():
-                return pdf_path
-        except Exception as error:
-            logger.warning("docx2pdf failed: %s", error)
         raise TemplateReportError(
-            "PDF conversion is unavailable: install LibreOffice or Microsoft Word."
+            "LibreOffice is not installed on this server, so PDF conversion is unavailable."
         )
     with tempfile.TemporaryDirectory() as tmp_dir:
         profile = Path(tmp_dir) / "profile"   # private profile avoids lock clashes
