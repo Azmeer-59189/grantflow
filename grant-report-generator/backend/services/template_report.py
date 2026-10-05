@@ -23,15 +23,27 @@ logger = logging.getLogger(__name__)
 
 TEMPLATES_DIR = Path(__file__).resolve().parents[1] / "templates"
 
-# Chapter value (as stored in the sheet) -> template file name
+# Chapter value (as stored in the sheet) -> template file name.
+# A chapter can have one template (a string) or one per Project Type (a dict
+# keyed by "Expansion" / "Non-Expansion"). A project type missing from the dict
+# has no template, so that grant uses the generic report.
 CHAPTER_TEMPLATES = {
     "IDF": "IDF_Canada.docx",
-    # "FOIHUS": "FOIHUS_USA.docx",
+    "FOIHUS": {
+        "Expansion": "FOIHUS_Expansion.docx",
+        "Non-Expansion": "FOIHUS_Non_Expansion.docx",
+    },
+    "IHN UK": {
+        "Expansion": "IHN_UK_Expansion.docx",
+        # "Non-Expansion": "IHN_UK_Non_Expansion.docx",   # template not provided yet
+    },
+    "FOIH Germany": "FOIH_Germany.docx",
     # "TIH UAE": "TIH_UAE.docx",
-    # "IHN UK": "IHN_UK.docx",
-    # "FOIH Germany": "FOIH_Germany.docx",
     # "FOIH Switzerland": "FOIH_Switzerland.docx",
 }
+
+# Which sheet field fills the "Project" line in the Grant Information table.
+PROJECT_FIELD = "project_type"
 
 # Sheet field -> label shown in the "Attachments" list (only filled ones appear)
 ATTACHMENT_FIELDS = [
@@ -52,17 +64,25 @@ class TemplateReportError(RuntimeError):
 
 
 # ── helpers ─────────────────────────────────────────────────────────────────
-def get_template_path(chapter: str) -> Path | None:
-    """Return the template path for a chapter, or None if it has none."""
-    name = CHAPTER_TEMPLATES.get((chapter or "").strip())
+def get_template_path(chapter: str, project_type: str = "") -> Path | None:
+    """Return the template path for a chapter (+ project type), or None."""
+    entry = CHAPTER_TEMPLATES.get((chapter or "").strip())
+    if isinstance(entry, dict):
+        name = entry.get((project_type or "").strip())
+    else:
+        name = entry
     if not name:
         return None
     path = TEMPLATES_DIR / name
     return path if path.is_file() else None
 
 
-def has_template(chapter: str) -> bool:
-    return get_template_path(chapter) is not None
+def has_template(grant) -> bool:
+    """True if this grant (a dict) has a chapter template. A plain chapter
+    string is also accepted, for chapters with a single template."""
+    if isinstance(grant, dict):
+        return get_template_path(grant.get("chapter", ""), grant.get("project_type", "")) is not None
+    return get_template_path(grant) is not None
 
 
 def _fmt_date(value) -> str:
@@ -98,6 +118,14 @@ def _fmt_number(value) -> str:
     return f"{number:,.0f}" if number.is_integer() else f"{number:,.2f}"
 
 
+def _fmt_money(value) -> str:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return ""
+    return f"{number:,.2f}" if number else ""
+
+
 def _is_url(value: str) -> bool:
     return str(value or "").strip().lower().startswith(("http://", "https://"))
 
@@ -124,11 +152,32 @@ def _build_context(grant: dict, tpl: DocxTemplate) -> dict:
         attachments.append({"rt": rich})
 
     has_util_report = _is_url(g("link_to_utilization_report"))
+    has_photo = _is_url(g("picture")) or g("pictures_status") == "Yes"
+
+    # Item cost: USD first, then the original currency when there is one
+    item_cost = ""
+    usd = _fmt_money(grant.get("total_grant_amount_usd"))
+    if usd:
+        item_cost = f"USD {usd}"
+        orig = _fmt_money(grant.get("total_grant_amount_orig"))
+        if orig and g("secondary_currency"):
+            item_cost += f" ({g('secondary_currency')} {orig})"
+
+    receiving_date = _fmt_date(grant.get("receiving_date"))
+    receiving_grn = " | ".join(part for part in (receiving_date, g("grn_number")) if part)
 
     return {
         # 1. Report information
         "report_date": _fmt_date(datetime.now().strftime("%Y-%m-%d")),
         "reporting_period": "",          # no field yet
+        "year": g("year"),
+        "project": g(PROJECT_FIELD),
+        "item_cost": item_cost,
+        "item_description": g("item_description"),
+        "supplier": g("supplier"),
+        "receiving_grn": receiving_grn,
+        "photo_yes": CHECKED if has_photo else UNCHECKED,
+        "photo_no": UNCHECKED if has_photo else CHECKED,
         # 2 / 3
         "grant_number": g("grant_number"),
         "payment_date": _fmt_date(grant.get("payment_date")),
@@ -145,7 +194,7 @@ def _build_context(grant: dict, tpl: DocxTemplate) -> dict:
         "bill_of_lading": g("bill_of_lading"),
         "packing_list_reference": g("packing_list_reference"),
         "grn_number": g("grn_number"),
-        "receiving_date": _fmt_date(grant.get("receiving_date")),
+        "receiving_date": receiving_date,
         # 6. Installation
         "installation_date": _fmt_date(grant.get("installation_date")),
         "building_name": g("building_name"),
@@ -162,10 +211,11 @@ def _build_context(grant: dict, tpl: DocxTemplate) -> dict:
 # ── public API ──────────────────────────────────────────────────────────────
 def create_template_word_report(grant: dict, output_path: Path) -> Path:
     """Fill the chapter's Word template and save it to ``output_path``."""
-    template_path = get_template_path(grant.get("chapter", ""))
+    template_path = get_template_path(grant.get("chapter", ""), grant.get("project_type", ""))
     if template_path is None:
         raise TemplateReportError(
-            f"No report template configured for chapter '{grant.get('chapter', '')}'."
+            f"No report template for chapter '{grant.get('chapter', '')}' "
+            f"/ project type '{grant.get('project_type', '')}'."
         )
     tpl = DocxTemplate(str(template_path))
     tpl.render(_build_context(grant, tpl))

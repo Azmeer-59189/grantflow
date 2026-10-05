@@ -202,7 +202,7 @@ def download_pdf(grant_number: str, payload: ReportSections = None) -> FileRespo
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     output_path = REPORTS_DIR / f"grant-{grant_number}-{timestamp}.pdf"
 
-    if has_template(grant.get("chapter", "")):
+    if has_template(grant):
         docx_path = REPORTS_DIR / f"grant-{grant_number}-{timestamp}.docx"
         try:
             create_template_word_report(grant, docx_path)
@@ -228,7 +228,7 @@ def download_word(grant_number: str, payload: ReportSections = None) -> FileResp
     ...
 
     try:
-        if has_template(grant.get("chapter", "")):
+        if has_template(grant):
             create_template_word_report(grant, output_path)
         else:
             create_word_report(grant, output_path, sections=sections)
@@ -244,7 +244,7 @@ def download_word(grant_number: str, payload: ReportSections = None) -> FileResp
     )
 
     try:
-        if has_template(grant.get("chapter", "")):
+        if has_template(grant):
             create_template_word_report(grant, output_path)
         else:
             create_word_report(grant, output_path, sections=sections)
