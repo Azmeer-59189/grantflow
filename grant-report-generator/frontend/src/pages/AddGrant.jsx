@@ -61,6 +61,12 @@ const INITIAL_FORM = {
   item_description: '',
 }
 
+const ALL_PROJECT_TYPES = ['Expansion', 'Non-Expansion']
+const PROJECT_TYPES_BY_CHAPTER = { 'IHN UK': ['Expansion'] }   // keep in sync with the backend
+function projectTypesFor(chapter) {
+  return PROJECT_TYPES_BY_CHAPTER[chapter] || ALL_PROJECT_TYPES
+}
+
 // ── Field components — defined OUTSIDE so they never remount ───────────────
 const inputClass = `w-full border border-gray-300 rounded-lg px-4 py-2
   text-sm focus:outline-none focus:ring-2 focus:ring-blue-500`
@@ -283,6 +289,13 @@ function AddGrant() {
     setForm(prev => {
       const updated = { ...prev, [name]: value }
 
+        if (name === 'chapter') {
+        const allowed = projectTypesFor(value)
+        if (!allowed.includes(updated.project_type)) {
+          updated.project_type = allowed.length === 1 ? allowed[0] : ''
+        }
+      }
+
       // Auto calculate Total Grant Amount USD
       if (name === 'total_grant_amount_orig') {
         const usd = (parseFloat(value) || 0) * exchangeRateRef.current
@@ -429,19 +442,16 @@ async function handleSubmit() {
               ]}
             />
             <SelectField
-              {...f('chapter')} label="Chapter"
-              options={[
-                'FOIHUS', 'IDF', 'TIH UAE',
-                'IHN UK', 'FOIH Germany', 'FOIH Switzerland'
-              ]}
+              {...f('chapter')} label="Chapter" required
+              options={['FOIHUS', 'IDF', 'TIH UAE', 'IHN UK', 'FOIH Germany', 'FOIH Switzerland']}
             />
             <TextField
               {...f('grant_number')} label="Grant Number" required
               placeholder="e.g. IHHN-FOIH-USA-Grant-0001-2026"
             />
             <SelectField
-              {...f('project_type')} label="Project Type"
-              options={['Expansion', 'Non-Expansion']}
+              {...f('project_type')} label="Project Type" required
+              options={projectTypesFor(form.chapter)}
             />
             <TextField
               {...f('department')} label="Department"

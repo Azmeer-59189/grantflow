@@ -38,6 +38,12 @@ VALID_COUNTRIES = {
     "United States", "Canada", "United Kingdom",
     "Germany", "Switzerland", "UAE"
 }
+VALID_PROJECT_TYPES = {"Expansion", "Non-Expansion"}
+
+# Chapters that run only one kind of project. A chapter not listed allows both.
+CHAPTER_PROJECT_TYPES = {
+    "IHN UK": {"Expansion"},
+}
 VALID_CHAPTERS = {
     "FOIHUS", "IDF", "TIH UAE", "IHN UK",
     "FOIH Germany", "FOIH Switzerland"
@@ -196,6 +202,23 @@ def validate_grant_dict(grant: dict, is_new: bool = True) -> None:
     year = str(grant.get("year", "")).strip()
     if year and not re.fullmatch(r"20\d{2}", year):
         raise GrantDataValidationError("Year must be a 4-digit year, e.g. 2025.")
+
+        chapter = str(grant.get("chapter", "")).strip()
+    project_type = str(grant.get("project_type", "")).strip()
+
+    if chapter not in VALID_CHAPTERS:
+        raise GrantDataValidationError(
+            f"Chapter is required. Choose one of: {', '.join(sorted(VALID_CHAPTERS))}"
+        )
+    if project_type not in VALID_PROJECT_TYPES:
+        raise GrantDataValidationError(
+            "Project Type is required: choose Expansion or Non-Expansion."
+        )
+    allowed = CHAPTER_PROJECT_TYPES.get(chapter)
+    if allowed and project_type not in allowed:
+        raise GrantDataValidationError(
+            f"{chapter} grants can only be: {', '.join(sorted(allowed))}."
+        )
 
     # Validate dropdowns
     if grant.get("country") not in VALID_COUNTRIES:
