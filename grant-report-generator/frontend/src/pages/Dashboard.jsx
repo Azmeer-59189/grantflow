@@ -1,8 +1,8 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../supabase'
 import {
-  PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer,
+  PieChart, Pie, Cell, Tooltip, ResponsiveContainer,
   BarChart, Bar, XAxis, YAxis, CartesianGrid, LabelList,
   ComposedChart, Area
 } from 'recharts'
@@ -10,21 +10,287 @@ import {
   ComposableMap, Geographies, Geography, ZoomableGroup
 } from 'react-simple-maps'
 
+// ── Constants ───────────────────────────────────────────────────────────────
 const CHAPTERS = ['FOIHUS', 'IDF', 'TIH UAE', 'IHN UK', 'FOIH Germany', 'FOIH Switzerland']
 const COUNTRIES = ['United States', 'Canada', 'United Kingdom', 'Germany', 'Switzerland', 'UAE']
-// Map country names to ISO codes for react-simple-maps
-const COUNTRY_ISO = {
-  'United States': 'USA',
-  'Canada': 'CAN',
-  'United Kingdom': 'GBR',
-  'Germany': 'DEU',
-  'Switzerland': 'CHE',
-  'UAE': 'ARE',
-}
-
 const GEO_URL = 'https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json'
 
+// Map geometry names -> our country names
+const GEO_NAME_MAP = {
+  'United States of America': 'United States',
+  'United Kingdom': 'United Kingdom',
+  'Germany': 'Germany',
+  'Switzerland': 'Switzerland',
+  'United Arab Emirates': 'UAE',
+  'Canada': 'Canada',
+}
 
+// Chart colors. Status colors are the same everywhere in the app.
+const STATUS_COLORS = {
+  'Complete': '#059669',
+  'Pending': '#d97706',
+  'Incomplete Information': '#e11d48',
+}
+const PROJECT_COLORS = { 'Expansion': '#1f5668', 'Non-Expansion': '#7fbccb' }
+const BRAND_LINE = '#2f8099'
+const AMBER_LINE = '#d97706'
+
+const ALL_SECTIONS_ON = {
+  overview: true, financial: true, dates: true,
+  shipping: true, grn: true, location: true,
+  item: true, pictures: true, report: true,
+}
+const ALL_SECTIONS_OFF = Object.fromEntries(
+  Object.keys(ALL_SECTIONS_ON).map(k => [k, false])
+)
+const SECTION_LABELS = [
+  { key: 'overview', label: 'Grant overview' },
+  { key: 'financial', label: 'Financial summary' },
+  { key: 'dates', label: 'Key dates' },
+  { key: 'shipping', label: 'Shipping & documents' },
+  { key: 'grn', label: 'GRN / receiving' },
+  { key: 'location', label: 'Installation & location' },
+  { key: 'item', label: 'Item details' },
+  { key: 'pictures', label: 'Pictures' },
+  { key: 'report', label: 'Report status' },
+]
+
+const TOOLTIP_STYLE = {
+  borderRadius: '8px', border: '1px solid #e2e8f0',
+  boxShadow: '0 6px 20px rgba(15,38,48,0.10)', fontSize: '12px', padding: '8px 12px',
+}
+
+// ── Small helpers ───────────────────────────────────────────────────────────
+const num = v => parseFloat(v) || 0
+const usd = v => (v ? `$${Number(v).toLocaleString()}` : '—')
+const usd0 = v => `$${v.toLocaleString(undefined, { maximumFractionDigits: 0 })}`
+
+// Dates can arrive as ISO text or as Google Sheets serial numbers
+function formatDate(v) {
+  if (!v) return ''
+  const s = String(v).trim()
+  const n = Number(s)
+  let d
+  if (!Number.isNaN(n) && n > 20000 && n < 80000) {
+    d = new Date(Date.UTC(1899, 11, 30 + Math.floor(n)))
+  } else if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
+    d = new Date(s.slice(0, 10) + 'T00:00:00Z')
+  } else {
+    return s
+  }
+  return d.toLocaleDateString('en-GB', {
+    day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC',
+  })
+}
+
+function statusTone(value) {
+  const green = ['Complete', 'Report Complete', 'Received', 'Paid']
+  const red = ['Overdue', 'Discrepancy', 'Not Received', 'Incomplete Information',
+    'Not received', 'Received with discrepancy']
+  const gray = ['Not required', 'Not applicable']
+  if (green.includes(value)) return 'green'
+  if (red.includes(value)) return 'red'
+  if (gray.includes(value)) return 'gray'
+  return 'amber'
+}
+const TONES = {
+  green: { pill: 'bg-emerald-50 text-emerald-700 ring-emerald-600/20', dot: 'bg-emerald-500' },
+  amber: { pill: 'bg-amber-50 text-amber-800 ring-amber-600/20', dot: 'bg-amber-500' },
+  red:   { pill: 'bg-rose-50 text-rose-700 ring-rose-600/20', dot: 'bg-rose-500' },
+  gray:  { pill: 'bg-slate-100 text-slate-600 ring-slate-500/20', dot: 'bg-slate-400' },
+}
+
+// ── Icons (inline, no extra package) ────────────────────────────────────────
+const ICONS = {
+  dashboard: 'M4 4h6v7H4zM14 4h6v4h-6zM14 12h6v8h-6zM4 15h6v5H4z',
+  records: 'M4 6h16M4 12h16M4 18h10',
+  plus: 'M12 5v14M5 12h14',
+  logout: 'M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9',
+  alert: 'M12 9v4M12 17h.01M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z',
+  external: 'M7 17L17 7M8 7h9v9',
+  close: 'M6 6l12 12M18 6L6 18',
+}
+function Icon({ name, className = 'h-5 w-5' }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
+         strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
+      <path d={ICONS[name]} />
+    </svg>
+  )
+}
+
+// ── Shared building blocks ──────────────────────────────────────────────────
+function StatusPill({ value }) {
+  if (!value) return <span className="text-slate-400">—</span>
+  const t = TONES[statusTone(value)]
+  return (
+    <span className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${t.pill}`}>
+      <span className={`h-1.5 w-1.5 rounded-full ${t.dot}`} />
+      {value}
+    </span>
+  )
+}
+
+function Card({ title, subtitle, action, children, className = '' }) {
+  return (
+    <section className={`rounded-xl border border-slate-200 bg-white ${className}`}>
+      {(title || action) && (
+        <header className="flex items-start justify-between gap-4 px-5 pt-5">
+          <div>
+            <h3 className="text-[15px] font-semibold text-slate-900">{title}</h3>
+            {subtitle && <p className="mt-0.5 text-sm text-slate-500">{subtitle}</p>}
+          </div>
+          {action}
+        </header>
+      )}
+      <div className="p-5">{children}</div>
+    </section>
+  )
+}
+
+function Empty({ children, height = 'h-40' }) {
+  return (
+    <div className={`flex ${height} items-center justify-center rounded-lg bg-slate-50 px-6 text-center text-sm text-slate-400`}>
+      {children}
+    </div>
+  )
+}
+
+function FilterSelect({ value, onChange, placeholder, options }) {
+  return (
+    <select
+      value={value} onChange={e => onChange(e.target.value)}
+      className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700
+                 focus:border-brand-500 focus:outline-none focus:ring-4 focus:ring-brand-100"
+    >
+      <option value="">{placeholder}</option>
+      {options.map(o => <option key={o} value={o}>{o}</option>)}
+    </select>
+  )
+}
+
+function DonutCard({ title, subtitle, data, colorFor }) {
+  const total = data.reduce((s, d) => s + d.value, 0)
+  return (
+    <Card title={title} subtitle={subtitle}>
+      {data.length === 0 ? <Empty>No data yet</Empty> : (
+        <div className="flex items-center gap-6">
+          <div className="relative h-44 w-44 shrink-0">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie data={data} dataKey="value" innerRadius={54} outerRadius={80}
+                     paddingAngle={2} strokeWidth={0}>
+                  {data.map(d => <Cell key={d.name} fill={colorFor(d.name)} />)}
+                </Pie>
+                <Tooltip contentStyle={TOOLTIP_STYLE} />
+              </PieChart>
+            </ResponsiveContainer>
+            <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+              <span className="text-2xl font-semibold tabular-nums text-slate-900">{total}</span>
+              <span className="text-xs text-slate-500">grants</span>
+            </div>
+          </div>
+          <ul className="flex-1 space-y-3">
+            {data.map(d => (
+              <li key={d.name} className="flex items-center justify-between gap-3 text-sm">
+                <span className="flex items-center gap-2 text-slate-600">
+                  <span className="h-2.5 w-2.5 rounded-full" style={{ background: colorFor(d.name) }} />
+                  {d.name}
+                </span>
+                <span className="font-semibold tabular-nums text-slate-900">{d.value}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </Card>
+  )
+}
+
+// ── Map helpers ─────────────────────────────────────────────────────────────
+function computeCountryStats(grants) {
+  const values = {}, counts = {}, chapters = {}
+  grants.forEach(g => {
+    const country = g.country || 'Unknown'
+    values[country] = (values[country] || 0) + num(g.total_grant_amount_usd)
+    counts[country] = (counts[country] || 0) + 1
+    if (!chapters[country]) chapters[country] = new Set()
+    if (g.chapter) chapters[country].add(g.chapter)
+  })
+  return { values, counts, chapters, max: Math.max(...Object.values(values), 1) }
+}
+
+function mapFill(geoName, stats, activeChapter) {
+  const ourName = GEO_NAME_MAP[geoName]
+  if (!ourName) return '#e3ebef'
+  if (activeChapter) {
+    const ch = stats.chapters[ourName]
+    if (!ch || !ch.has(activeChapter)) return '#e3ebef'
+  }
+  const value = stats.values[ourName] || 0
+  if (value === 0) return '#c9dbe2'
+  const intensity = value / stats.max
+  if (intensity > 0.7) return '#163a47'
+  if (intensity > 0.4) return '#1f5668'
+  if (intensity > 0.1) return '#3f93ab'
+  return '#8fc3d1'
+}
+
+// ── Detail modal pieces ─────────────────────────────────────────────────────
+function DetailSection({ title, children }) {
+  return (
+    <section>
+      <h3 className="mb-3 border-b border-slate-100 pb-2 text-sm font-semibold text-brand-800">{title}</h3>
+      <dl className="grid gap-x-8 gap-y-3.5 sm:grid-cols-2">{children}</dl>
+    </section>
+  )
+}
+function DetailField({ label, value, tone }) {
+  return (
+    <div>
+      <dt className="text-xs text-slate-500">{label}</dt>
+      <dd className={`mt-0.5 text-sm font-medium ${tone || 'text-slate-900'}`}>{value || '—'}</dd>
+    </div>
+  )
+}
+function DetailStatus({ label, value }) {
+  return (
+    <div>
+      <dt className="text-xs text-slate-500">{label}</dt>
+      <dd className="mt-1"><StatusPill value={value} /></dd>
+    </div>
+  )
+}
+function DetailLink({ label, value }) {
+  return (
+    <div>
+      <dt className="text-xs text-slate-500">{label}</dt>
+      <dd className="mt-0.5 text-sm">
+        {value ? (
+          <a href={value} target="_blank" rel="noreferrer"
+             className="inline-flex items-center gap-1 font-medium text-brand-600 hover:text-brand-800 hover:underline">
+            Open link <Icon name="external" className="h-3.5 w-3.5" />
+          </a>
+        ) : <span className="text-slate-400">—</span>}
+      </dd>
+    </div>
+  )
+}
+function Note({ title, tone = 'slate', children }) {
+  const tones = {
+    slate: 'border-slate-200 bg-slate-50 text-slate-600',
+    amber: 'border-amber-200 bg-amber-50 text-amber-800',
+    brand: 'border-brand-100 bg-brand-50 text-brand-800',
+  }
+  return (
+    <div className={`rounded-lg border p-3.5 sm:col-span-2 ${tones[tone]}`}>
+      <p className="mb-1 text-xs font-semibold">{title}</p>
+      <p className="text-sm text-slate-700">{children}</p>
+    </div>
+  )
+}
+
+// ── Main component ──────────────────────────────────────────────────────────
 function Dashboard({ session }) {
   const navigate = useNavigate()
   const [data, setData] = useState(null)
@@ -37,11 +303,7 @@ function Dashboard({ session }) {
   const [activeChapter, setActiveChapter] = useState('')
   const [mapZoom, setMapZoom] = useState({ coordinates: [10, 30], zoom: 1 })
   const [mapTooltip, setMapTooltip] = useState(null)
-  const [selectedSections, setSelectedSections] = useState({
-    overview: true, financial: true, dates: true,
-    shipping: true, grn: true, location: true,
-    item: true, pictures: true, report: true,
-  })
+  const [selectedSections, setSelectedSections] = useState(ALL_SECTIONS_ON)
 
   // Records filters
   const [filterCountry, setFilterCountry] = useState('')
@@ -49,7 +311,6 @@ function Dashboard({ session }) {
   const [filterDept, setFilterDept] = useState('')
   const [filterPayment, setFilterPayment] = useState('')
   const [filterReport, setFilterReport] = useState('')
-  const [filterShipping, setFilterShipping] = useState('')
   const [filterSearch, setFilterSearch] = useState('')
 
   useEffect(() => { fetchGrants() }, [])
@@ -61,6 +322,7 @@ function Dashboard({ session }) {
       const json = await response.json()
       if (!response.ok) throw new Error(json.detail || 'Failed to load')
       setData(json)
+      setError('')
     } catch (err) {
       setError(err.message)
     } finally {
@@ -98,92 +360,52 @@ function Dashboard({ session }) {
     }
   }
 
-  function pillColor(value) {
-    const green = ['Complete', 'Report Complete', 'Received', 'Paid']
-    const red = ['Overdue', 'Discrepancy', 'Not Received',
-      'Incomplete Information', 'Not received',
-      'Received with discrepancy']
-    if (green.includes(value)) return 'bg-blue-100 text-blue-700'
-    if (red.includes(value)) return 'bg-red-100 text-red-700'
-    return 'bg-amber-100 text-amber-700'
-  }
-
-  // Filter grants by active chapter
+  // ── Derived data ──────────────────────────────────────────────────────
   const filteredGrants = data?.grants?.filter(g =>
     !activeChapter || g.chapter === activeChapter
   ) || []
 
-  // ── KPI Calculations ──────────────────────────────────────────────────
-  const totalGrantValueUSD = filteredGrants.reduce(
-    (sum, g) => sum + (parseFloat(g.total_grant_amount_usd) || 0), 0
-  )
+  const totalGrantValueUSD = filteredGrants.reduce((s, g) => s + num(g.total_grant_amount_usd), 0)
   const totalCount = filteredGrants.length
   const highestGrant = filteredGrants.reduce((max, g) =>
-    (parseFloat(g.total_grant_amount_usd) || 0) >
-    (parseFloat(max?.total_grant_amount_usd) || 0) ? g : max,
-    null
-  )
+    num(g.total_grant_amount_usd) > num(max?.total_grant_amount_usd) ? g : max, null)
   const pendingReports = filteredGrants.filter(
-    g => g.report_status === 'Pending' ||
-      g.report_status === 'Incomplete Information'
+    g => g.report_status === 'Pending' || g.report_status === 'Incomplete Information'
   ).length
-  const shippingIssues = filteredGrants.filter(
+  const discrepancies = filteredGrants.filter(
     g => g.shipping_documents_status?.toLowerCase().includes('discrepancy')
-  ).length
+  )
+  const shippingIssues = discrepancies.length
 
-  // ── Chart Data ────────────────────────────────────────────────────────
-  function getProjectTypeData() {
-    const counts = { Expansion: 0, 'Non-Expansion': 0 }
-    filteredGrants.forEach(g => {
-      if (g.project_type === 'Expansion') counts.Expansion++
-      else if (g.project_type === 'Non-Expansion') counts['Non-Expansion']++
-    })
-    return Object.entries(counts)
-      .map(([name, value]) => ({ name, value }))
-      .filter(d => d.value > 0)
-  }
-
-  function getReportStatusData() {
-    const counts = { 'Complete': 0, 'Pending': 0, 'Incomplete Information': 0 }
-    filteredGrants.forEach(g => {
-      if (counts[g.report_status] !== undefined) counts[g.report_status]++
-    })
-    return Object.entries(counts)
-      .map(([name, value]) => ({ name, value }))
-      .filter(d => d.value > 0)
-  }
-
-  function getCountryData() {
+  function countBy(getKey, order) {
     const counts = {}
     filteredGrants.forEach(g => {
-      const c = g.country || 'Unknown'
-      counts[c] = (counts[c] || 0) + 1
+      const k = getKey(g)
+      if (k !== undefined && k !== null) counts[k] = (counts[k] || 0) + 1
     })
-    return Object.entries(counts)
-      .map(([name, value]) => ({ name, value }))
-      .sort((a, b) => b.value - a.value)
+    const names = order || Object.keys(counts)
+    return names
+      .map(name => ({ name, value: counts[name] || 0 }))
+      .filter(d => d.value > 0)
   }
+
+  const projectTypeData = countBy(g => g.project_type, ['Expansion', 'Non-Expansion'])
+  const reportStatusData = countBy(g => g.report_status, ['Complete', 'Pending', 'Incomplete Information'])
+  const countryData = countBy(g => g.country || 'Unknown').sort((a, b) => b.value - a.value)
 
   function getActivityData() {
     const dated = filteredGrants
       .filter(g => g.grant_receiving_date)
-      .map(g => ({
-        date: g.grant_receiving_date,
-        payment: parseFloat(g.current_payment_usd) || 0
-      }))
+      .map(g => ({ date: g.grant_receiving_date, payment: num(g.current_payment_usd) }))
       .sort((a, b) => new Date(a.date) - new Date(b.date))
-
     if (dated.length === 0) return []
-
     const grouped = {}
     dated.forEach(({ date, payment }) => {
       if (!grouped[date]) grouped[date] = { date, count: 0, payment: 0 }
       grouped[date].count += 1
       grouped[date].payment += payment
     })
-
-    let cumCount = 0
-    let cumPayment = 0
+    let cumCount = 0, cumPayment = 0
     return Object.values(grouped)
       .sort((a, b) => new Date(a.date) - new Date(b.date))
       .map(d => {
@@ -192,1578 +414,711 @@ function Dashboard({ session }) {
         return { date: d.date, grants: cumCount, payment: Math.round(cumPayment) }
       })
   }
-
-  const projectTypeData = getProjectTypeData()
-  const reportStatusData = getReportStatusData()
-  const countryData = getCountryData()
   const activityData = getActivityData()
-  const discrepancies = filteredGrants.filter(
-    g => g.shipping_documents_status?.toLowerCase().includes('discrepancy')
-  )
+  const mapStats = computeCountryStats(filteredGrants)
 
-  const PROJECT_COLORS = ['#08325C', '#E8A916']
-  const REPORT_COLORS = ['#1D6FB8', '#E8A916', '#C0272D']
+  const q = filterSearch.toLowerCase()
+  const recordRows = (data?.grants || [])
+    .filter(g => !filterCountry || g.country === filterCountry)
+    .filter(g => !filterChapter || g.chapter === filterChapter)
+    .filter(g => !filterDept || g.department === filterDept)
+    .filter(g => !filterPayment || g.payment_status === filterPayment)
+    .filter(g => !filterReport || g.report_status === filterReport)
+    .filter(g => !q ||
+      g.grant_number?.toLowerCase().includes(q) ||
+      g.supplier?.toLowerCase().includes(q) ||
+      g.item?.toLowerCase().includes(q))
+  const anyFilter = filterCountry || filterChapter || filterDept ||
+    filterPayment || filterReport || filterSearch
+
+  function clearFilters() {
+    setFilterCountry(''); setFilterChapter(''); setFilterDept('')
+    setFilterPayment(''); setFilterReport(''); setFilterSearch('')
+  }
+
+  const NAV = [
+    { id: 'dashboard', label: 'Dashboard' },
+    { id: 'records', label: 'Records' },
+  ]
+  const th = 'sticky top-0 z-[1] whitespace-nowrap bg-slate-50 px-4 py-3 text-xs font-semibold text-slate-500'
 
   return (
-    <div className="flex min-h-screen bg-gray-100">
+    <div className="flex min-h-screen bg-canvas">
 
-      {/* ── Sidebar ───────────────────────────────────────────────── */}
-      <div className="hidden md:flex w-56 flex-shrink-0 flex-col"
-           style={{ background: '#08325C' }}>
-        <div className="px-5 py-6 border-b border-white border-opacity-10">
-          <div className="text-white font-semibold text-base leading-tight">
-            Grant Utilization<br />Ledger
-          </div>
-          <div className="text-xs mt-1" style={{ color: '#B9C9C4' }}>
-            IHHN · FOIH
+      {/* ── Side rail ─────────────────────────────────────────────── */}
+      <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col bg-brand-900 text-white md:flex">
+        <div className="flex items-center gap-3 px-5 py-6">
+          <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/10 font-bold ring-1 ring-white/20">G</span>
+          <div className="leading-tight">
+            <div className="text-base font-semibold">GrantFlow</div>
+            <div className="text-xs text-brand-300">IHHN and FOIH grants</div>
           </div>
         </div>
-        <nav className="mt-3 flex-1">
-          {[
-            { id: 'dashboard', label: 'Dashboard' },
-            { id: 'records', label: 'Records' },
-          ].map(item => (
+        <nav className="mt-2 flex-1 space-y-1 px-3">
+          {NAV.map(item => (
             <button
               key={item.id}
               onClick={() => setActiveNav(item.id)}
-              className={`w-full text-left px-5 py-3 text-sm font-medium
-                         flex items-center gap-2 transition border-l-4
-                         ${activeNav === item.id
-                           ? 'text-white border-yellow-400'
-                           : 'text-gray-300 border-transparent hover:text-white'
-                         }`}
-              style={{
-                background: activeNav === item.id
-                  ? 'rgba(255,255,255,0.08)' : 'transparent'
-              }}
+              className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition
+                ${activeNav === item.id
+                  ? 'bg-white/10 text-white'
+                  : 'text-brand-200 hover:bg-white/5 hover:text-white'}`}
             >
-              ◆ {item.label}
+              <Icon name={item.id} className="h-[18px] w-[18px]" />
+              {item.label}
             </button>
           ))}
+          <button
+            onClick={() => navigate('/add-grant')}
+            className="mt-3 flex w-full items-center gap-3 rounded-lg border border-white/15 px-3 py-2.5
+                       text-sm font-medium text-white transition hover:bg-white/10"
+          >
+            <Icon name="plus" className="h-[18px] w-[18px]" />
+            Add grant
+          </button>
         </nav>
-        <div className="px-5 py-4 text-xs border-t border-white border-opacity-10"
-             style={{ color: '#8FA39D' }}>
-          {session.user.email}
+        <div className="border-t border-white/10 px-5 py-4">
+          <p className="truncate text-xs text-brand-300">{session.user.email}</p>
           <button
             onClick={handleLogout}
-            className="block mt-2 text-red-400 hover:text-red-300"
+            className="mt-2 flex items-center gap-2 text-sm text-brand-200 transition hover:text-white"
           >
-            Sign out
+            <Icon name="logout" className="h-4 w-4" /> Sign out
           </button>
         </div>
-      </div>
+      </aside>
 
-      {/* ── Main Content ──────────────────────────────────────────── */}
-      <div className="flex-1 overflow-auto">
+      {/* ── Main ──────────────────────────────────────────────────── */}
+      <div className="min-w-0 flex-1">
 
-        {/* Mobile navbar */}
-        <div className="md:hidden flex items-center justify-between px-4 py-3
-                        border-b border-gray-200 bg-white sticky top-0 z-10">
-          <div>
-            <div className="text-sm font-bold text-blue-900">
-              Grant Utilization Ledger
-            </div>
-            <div className="text-xs text-gray-400">IHHN · FOIH</div>
-          </div>
-          <div className="flex gap-2">
-            {['dashboard', 'records'].map(nav => (
+        {/* Mobile bar */}
+        <div className="sticky top-0 z-20 flex items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3 md:hidden">
+          <span className="text-base font-semibold text-brand-900">GrantFlow</span>
+          <div className="flex gap-1.5">
+            {NAV.map(n => (
               <button
-                key={nav}
-                onClick={() => setActiveNav(nav)}
-                className={`text-xs px-3 py-1.5 rounded-lg font-medium capitalize
-                  ${activeNav === nav
-                    ? 'bg-blue-700 text-white'
-                    : 'text-gray-500 border border-gray-200'}`}
+                key={n.id}
+                onClick={() => setActiveNav(n.id)}
+                className={`rounded-lg px-3 py-1.5 text-xs font-medium
+                  ${activeNav === n.id ? 'bg-brand-700 text-white' : 'border border-slate-200 text-slate-600'}`}
               >
-                {nav}
+                {n.label}
               </button>
             ))}
           </div>
-          <button onClick={handleLogout} className="text-xs text-red-500">
-            Sign out
-          </button>
+          <button onClick={handleLogout} className="text-xs text-slate-500">Sign out</button>
         </div>
 
-        <div className="p-4 md:p-8">
+        <div className="mx-auto max-w-[1400px] p-4 md:p-8">
 
-          {/* ── DASHBOARD VIEW ──────────────────────────────────── */}
+          {/* ═══ DASHBOARD VIEW ═══ */}
           {activeNav === 'dashboard' && (
             <>
-              {/* Page header */}
-              <div className="mb-4">
-                <h1 className="text-2xl font-bold text-gray-800"
-                    style={{ fontFamily: 'Georgia, serif' }}>
-                  Dashboard
-                </h1>
-                <p className="text-sm text-gray-500 mt-1">
-                  Grant utilization across all regions
+              <div className="mb-6">
+                <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Dashboard</h1>
+                <p className="mt-1 text-sm text-slate-500">
+                  {activeChapter
+                    ? `Showing grants for ${activeChapter}`
+                    : 'Grant utilization across all chapters'}
                 </p>
               </div>
 
-              {/* Chapter Filter Buttons */}
-              <div className="bg-white rounded-xl border border-gray-100
-                              shadow-sm p-4 mb-6">
-                <p className="text-xs font-semibold text-gray-400 uppercase
-                               tracking-wider mb-3">
-                  Filter by Chapter
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    onClick={() => setActiveChapter('')}
-                    className={`px-4 py-2 rounded-lg text-sm font-medium
-                                transition border
-                      ${activeChapter === ''
-                        ? 'bg-blue-900 text-white border-blue-900'
-                        : 'text-gray-600 border-gray-200 hover:border-blue-300'
-                      }`}
-                  >
-                    All Chapters
-                  </button>
-                  {CHAPTERS.map(chapter => (
+              {/* Chapter filter */}
+              <div className="mb-6 flex flex-wrap gap-2" role="group" aria-label="Filter by chapter">
+                {['', ...CHAPTERS].map(ch => {
+                  const active = activeChapter === ch
+                  return (
                     <button
-                      key={chapter}
-                      onClick={() => setActiveChapter(
-                        activeChapter === chapter ? '' : chapter
-                      )}
-                      className={`px-4 py-2 rounded-lg text-sm font-medium
-                                  transition border
-                        ${activeChapter === chapter
-                          ? 'bg-blue-900 text-white border-blue-900'
-                          : 'text-gray-600 border-gray-200 hover:border-blue-300'
-                        }`}
+                      key={ch || 'all'}
+                      onClick={() => setActiveChapter(ch)}
+                      aria-pressed={active}
+                      className={`rounded-full border px-4 py-1.5 text-sm font-medium transition
+                        ${active
+                          ? 'border-brand-700 bg-brand-700 text-white'
+                          : 'border-slate-200 bg-white text-slate-600 hover:border-brand-300 hover:text-brand-800'}`}
                     >
-                      {chapter}
+                      {ch || 'All chapters'}
                     </button>
-                  ))}
-                </div>
+                  )
+                })}
               </div>
 
-              {loading && (
-                <p className="text-gray-400 text-center py-12">
-                  Loading grants...
-                </p>
-              )}
+              {loading && <p className="py-12 text-center text-slate-400">Loading grants…</p>}
               {error && (
-                <div className="bg-red-50 text-red-600 p-4 rounded-lg mb-6">
-                  {error}
+                <div role="alert" className="mb-6 flex items-center justify-between gap-4 rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
+                  <span>{error}</span>
+                  <button onClick={fetchGrants} className="font-semibold underline">Try again</button>
                 </div>
               )}
 
               {data && (
                 <>
-                  {/* KPI Ribbon */}
-                  <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
-                    <div className="bg-white rounded-xl p-5 shadow-sm
-                                    border border-gray-100">
-                      <p className="text-xs text-gray-400 uppercase
-                                    tracking-wide">
-                        Total Records
+                  {/* KPI band */}
+                  <section className="mb-6 grid overflow-hidden rounded-xl border border-slate-200 bg-white
+                                      md:grid-cols-[1.4fr_1fr_1fr_1fr_1.3fr] md:divide-x md:divide-slate-200
+                                      max-md:divide-y max-md:divide-slate-200">
+                    <div className="p-5">
+                      <p className="text-sm text-slate-500">Total grant value</p>
+                      <p className="mt-1 text-3xl font-semibold tabular-nums tracking-tight text-brand-800">
+                        {usd0(totalGrantValueUSD)}
                       </p>
-                      <p className="text-3xl font-bold text-gray-800 mt-1">
-                        {totalCount}
-                      </p>
+                      <p className="mt-1 text-xs text-slate-400">USD, all grants shown</p>
                     </div>
-                    <div className="bg-white rounded-xl p-5 shadow-sm
-                                    border border-gray-100">
-                      <p className="text-xs text-gray-400 uppercase
-                                    tracking-wide">
-                        Total Grant Value
-                      </p>
-                      <p className="text-2xl font-bold text-amber-500 mt-1">
-                        ${totalGrantValueUSD.toLocaleString(undefined, {
-                          maximumFractionDigits: 0
-                        })}
-                      </p>
+                    <div className="p-5">
+                      <p className="text-sm text-slate-500">Records</p>
+                      <p className="mt-1 text-3xl font-semibold tabular-nums text-slate-900">{totalCount}</p>
                     </div>
-                    <div className="bg-white rounded-xl p-5 shadow-sm
-                                    border border-gray-100">
-                      <p className="text-xs text-gray-400 uppercase
-                                    tracking-wide">
-                        Reports Pending
+                    <div className="p-5">
+                      <p className="flex items-center gap-2 text-sm text-slate-500">
+                        <span className="h-2 w-2 rounded-full bg-amber-500" /> Reports pending
                       </p>
-                      <p className="text-3xl font-bold text-blue-700 mt-1">
-                        {pendingReports}
-                      </p>
+                      <p className="mt-1 text-3xl font-semibold tabular-nums text-slate-900">{pendingReports}</p>
                     </div>
-                    <div className="bg-white rounded-xl p-5 shadow-sm
-                                    border border-gray-100">
-                      <p className="text-xs text-gray-400 uppercase
-                                    tracking-wide">
-                        Discrepancies
+                    <div className="p-5">
+                      <p className="flex items-center gap-2 text-sm text-slate-500">
+                        <span className="h-2 w-2 rounded-full bg-rose-500" /> Discrepancies
                       </p>
-                      <p className="text-3xl font-bold text-red-600 mt-1">
-                        {shippingIssues}
-                      </p>
+                      <p className="mt-1 text-3xl font-semibold tabular-nums text-slate-900">{shippingIssues}</p>
                     </div>
+                    <div className="min-w-0 p-5">
+                      <p className="text-sm text-slate-500">Highest grant</p>
+                      {highestGrant ? (
+                        <>
+                          <p className="mt-1 text-xl font-semibold tabular-nums text-slate-900">
+                            {usd0(num(highestGrant.total_grant_amount_usd))}
+                          </p>
+                          <p className="mt-1 truncate text-xs font-medium text-slate-600">{highestGrant.grant_number}</p>
+                          <p className="truncate text-xs text-slate-400">{highestGrant.supplier} — {highestGrant.item}</p>
+                        </>
+                      ) : <p className="mt-1 text-sm text-slate-400">No grants yet</p>}
+                    </div>
+                  </section>
 
-                    {/* Highest Grant Card */}
-                    {highestGrant && (
-                      <div className="bg-white rounded-xl p-5 shadow-sm
-                                      border border-gray-100 col-span-2
-                                      md:col-span-1">
-                        <p className="text-xs text-gray-400 uppercase
-                                      tracking-wide mb-2">
-                          Highest Grant
-                        </p>
-                        <p className="text-xl font-bold text-blue-900">
-                          ${parseFloat(
-                            highestGrant.total_grant_amount_usd || 0
-                          ).toLocaleString(undefined, {
-                            maximumFractionDigits: 0
-                          })}
-                        </p>
-                        <p className="text-xs text-gray-500 mt-1 truncate">
-                          {highestGrant.grant_number}
-                        </p>
-                        <p className="text-xs text-gray-400 truncate">
-                          {highestGrant.supplier}
-                        </p>
-                        <p className="text-xs text-gray-400 truncate">
-                          {highestGrant.item}
-                        </p>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Discrepancy Alert */}
+                  {/* Discrepancy alert */}
                   {discrepancies.length > 0 && (
-                    <div className="rounded-xl border border-red-200 mb-6 p-5"
-                         style={{ background: '#FEF2F2' }}>
-                      <h3 className="text-xs font-bold text-red-600 uppercase
-                                     tracking-widest mb-3">
-                        ⚠ Shipping / Invoice Discrepancies
+                    <section className="mb-6 rounded-xl border border-rose-200 bg-rose-50 p-5">
+                      <h3 className="mb-2 flex items-center gap-2 text-sm font-semibold text-rose-800">
+                        <Icon name="alert" className="h-4 w-4" />
+                        Shipping or invoice discrepancies ({discrepancies.length})
                       </h3>
-                      {discrepancies.slice(0, 8).map((g, i) => (
-                        <div key={i}
-                             className="flex justify-between items-center
-                                        py-2 border-t border-red-100 text-sm">
-                          <span className="text-gray-700">
-                            {g.grant_number} — {g.item}
-                          </span>
-                          <button
-                            onClick={() => setSelectedGrant(g)}
-                            className="text-xs font-semibold text-red-500
-                                       hover:text-red-700 underline ml-4"
-                          >
+                      {discrepancies.slice(0, 8).map(g => (
+                        <div key={g.grant_number}
+                             className="flex items-center justify-between border-t border-rose-100 py-2 text-sm first:border-t-0">
+                          <span className="text-slate-700">{g.grant_number} — {g.item}</span>
+                          <button onClick={() => setDetailGrant(g)}
+                                  className="ml-4 text-sm font-medium text-rose-700 underline hover:text-rose-900">
                             View
                           </button>
                         </div>
                       ))}
-                    </div>
+                    </section>
                   )}
 
-                  {/* Charts Row 1 — Project Type + Report Status */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-
-                    {/* Project Type Donut */}
-                    <div className="bg-white rounded-2xl border border-gray-100
-                                    shadow-sm p-6">
-                      <div className="flex justify-between items-center mb-2">
-                        <div>
-                          <h3 className="font-bold text-gray-800 text-sm">
-                            Distribution of Project Type
-                          </h3>
-                          <p className="text-xs text-gray-400 mt-0.5">
-                            Expansion vs Non-Expansion
-                          </p>
-                        </div>
-                        <div className="flex gap-3">
-                          {projectTypeData.map((d, i) => (
-                            <div key={i} className="text-right">
-                              <div className="text-lg font-bold"
-                                   style={{ color: PROJECT_COLORS[i] }}>
-                                {d.value}
-                              </div>
-                              <div className="text-xs text-gray-400">
-                                {d.name}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                      {projectTypeData.length === 0 ? (
-                        <div className="flex items-center justify-center
-                                        h-40 text-gray-300 text-sm">
-                          No data yet
-                        </div>
-                      ) : (
-                        <ResponsiveContainer width="100%" height={200}>
-                          <PieChart>
-                            <Pie
-                              data={projectTypeData}
-                              cx="50%"
-                              cy="50%"
-                              innerRadius={55}
-                              outerRadius={80}
-                              paddingAngle={3}
-                              dataKey="value"
-                              strokeWidth={0}
-                            >
-                              {projectTypeData.map((_, i) => (
-                                <Cell key={i}
-                                  fill={PROJECT_COLORS[i % 2]} />
-                              ))}
-                            </Pie>
-                            <Tooltip
-                              contentStyle={{
-                                borderRadius: '10px', border: 'none',
-                                boxShadow: '0 4px 20px rgba(0,0,0,0.12)',
-                                fontSize: '12px'
-                              }}
-                            />
-                            <Legend
-                              iconType="circle" iconSize={7}
-                              formatter={v => (
-                                <span style={{
-                                  fontSize: '12px', color: '#5B6B82'
-                                }}>
-                                  {v}
-                                </span>
-                              )}
-                            />
-                          </PieChart>
-                        </ResponsiveContainer>
-                      )}
-                    </div>
-
-                    {/* Report Status Donut */}
-                    <div className="bg-white rounded-2xl border border-gray-100
-                                    shadow-sm p-6">
-                      <div className="flex justify-between items-center mb-2">
-                        <div>
-                          <h3 className="font-bold text-gray-800 text-sm">
-                            Report Status
-                          </h3>
-                          <p className="text-xs text-gray-400 mt-0.5">
-                            {totalCount} total grants
-                          </p>
-                        </div>
-                        <div className="flex gap-3">
-                          {reportStatusData.map((d, i) => (
-                            <div key={i} className="text-right">
-                              <div className="text-lg font-bold"
-                                   style={{ color: REPORT_COLORS[i] }}>
-                                {d.value}
-                              </div>
-                              <div className="text-xs text-gray-400">
-                                {d.name}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                      {reportStatusData.length === 0 ? (
-                        <div className="flex items-center justify-center
-                                        h-40 text-gray-300 text-sm">
-                          No data yet
-                        </div>
-                      ) : (
-                        <ResponsiveContainer width="100%" height={200}>
-                          <PieChart>
-                            <Pie
-                              data={reportStatusData}
-                              cx="50%"
-                              cy="50%"
-                              innerRadius={55}
-                              outerRadius={80}
-                              paddingAngle={3}
-                              dataKey="value"
-                              strokeWidth={0}
-                            >
-                              {reportStatusData.map((_, i) => (
-                                <Cell key={i}
-                                  fill={REPORT_COLORS[i % 3]} />
-                              ))}
-                            </Pie>
-                            <Tooltip
-                              contentStyle={{
-                                borderRadius: '10px', border: 'none',
-                                boxShadow: '0 4px 20px rgba(0,0,0,0.12)',
-                                fontSize: '12px'
-                              }}
-                            />
-                            <Legend
-                              iconType="circle" iconSize={7}
-                              formatter={v => (
-                                <span style={{
-                                  fontSize: '12px', color: '#5B6B82'
-                                }}>
-                                  {v}
-                                </span>
-                              )}
-                            />
-                          </PieChart>
-                        </ResponsiveContainer>
-                      )}
-                    </div>
+                  {/* Donuts */}
+                  <div className="mb-6 grid gap-6 lg:grid-cols-2">
+                    <DonutCard
+                      title="Project type" subtitle="Expansion and non-expansion grants"
+                      data={projectTypeData} colorFor={n => PROJECT_COLORS[n] || '#94a3b8'}
+                    />
+                    <DonutCard
+                      title="Report status" subtitle={`${totalCount} grants in total`}
+                      data={reportStatusData} colorFor={n => STATUS_COLORS[n] || '#94a3b8'}
+                    />
                   </div>
 
-                  {/* World Map */}
-<div className="bg-white rounded-2xl border border-gray-100
-                shadow-sm p-6 mb-6">
-  <div className="flex justify-between items-center mb-4">
-    <div>
-      <h3 className="font-bold text-gray-800 text-sm">
-        Deployment Sites
-      </h3>
-      <p className="text-xs text-gray-400 mt-0.5">
-        Grant activity by country — scroll to zoom, drag to pan
-      </p>
-    </div>
-    <button
-      onClick={() => setMapZoom({ coordinates: [0, 20], zoom: 1 })}
-      className="text-xs text-gray-400 hover:text-gray-600 border
-                 border-gray-200 px-3 py-1.5 rounded-lg transition"
-    >
-      Reset view
-    </button>
-  </div>
-
-  {(() => {
-    // Calculate total grant value per country
-    const countryValues = {}
-    const countryGrantCounts = {}
-    const countryChapters = {}
-
-    filteredGrants.forEach(g => {
-      const country = g.country || 'Unknown'
-      const value = parseFloat(g.total_grant_amount_usd) || 0
-      countryValues[country] = (countryValues[country] || 0) + value
-      countryGrantCounts[country] = (countryGrantCounts[country] || 0) + 1
-      if (!countryChapters[country]) countryChapters[country] = new Set()
-      if (g.chapter) countryChapters[country].add(g.chapter)
-    })
-
-    const maxValue = Math.max(...Object.values(countryValues), 1)
-
-    function getCountryColor(geoName) {
-      // Match geo name to our country names
-      const nameMap = {
-        'United States of America': 'United States',
-        'United Kingdom': 'United Kingdom',
-        'Germany': 'Germany',
-        'Switzerland': 'Switzerland',
-        'United Arab Emirates': 'UAE',
-        'Canada': 'Canada',
-      }
-      const ourName = nameMap[geoName]
-      if (!ourName) return '#E8EDF2'
-
-      // If chapter filter active, only highlight matching country
-      if (activeChapter) {
-        const chapters = countryChapters[ourName]
-        if (!chapters || !chapters.has(activeChapter)) return '#E8EDF2'
-      }
-
-      const value = countryValues[ourName] || 0
-      if (value === 0) return '#B8C9D9'
-
-      // Intensity based on value
-      const intensity = value / maxValue
-      if (intensity > 0.7) return '#08325C'
-      if (intensity > 0.4) return '#0B4C8C'
-      if (intensity > 0.1) return '#1D6FB8'
-      return '#6FA8D4'
-    }
-
-    return (
-      <div className="relative" style={{ height: '400px' }}>
-        <ComposableMap
-          projection="geoMercator"
-          projectionConfig={{ scale: 130, center: [10, 30] }}
-          style={{ width: '100%', height: '100%' }}
-        >
-          <ZoomableGroup
-            zoom={mapZoom.zoom}
-            center={mapZoom.coordinates}
-            onMoveEnd={({ coordinates, zoom }) =>
-              setMapZoom({ coordinates, zoom })
-            }
-            minZoom={0.5}
-            maxZoom={8}
-          >
-            <Geographies geography={GEO_URL}>
-              {({ geographies }) =>
-                geographies.map(geo => {
-                  const geoName = geo.properties.name
-                  const color = getCountryColor(geoName)
-                  const nameMap = {
-                    'United States of America': 'United States',
-                    'United Kingdom': 'United Kingdom',
-                    'Germany': 'Germany',
-                    'Switzerland': 'Switzerland',
-                    'United Arab Emirates': 'UAE',
-                    'Canada': 'Canada',
-                  }
-                  const ourName = nameMap[geoName]
-                  const isHighlighted = ourName &&
-                    countryValues[ourName] !== undefined
-
-                  return (
-                    <Geography
-                      key={geo.rsmKey}
-                      geography={geo}
-                      fill={color}
-                      stroke="#FFFFFF"
-                      strokeWidth={0.5}
-                      style={{
-                        default: { outline: 'none' },
-                        hover: {
-                          fill: isHighlighted ? '#E8A916' : '#D1D9E0',
-                          outline: 'none',
-                          cursor: isHighlighted ? 'pointer' : 'default'
-                        },
-                        pressed: { outline: 'none' }
-                      }}
-                      onMouseEnter={() => {
-                        if (ourName && countryGrantCounts[ourName]) {
-                          setMapTooltip({
-                            name: ourName,
-                            grants: countryGrantCounts[ourName],
-                            value: countryValues[ourName] || 0,
-                            chapters: countryChapters[ourName]
-                              ? [...countryChapters[ourName]].join(', ')
-                              : '—'
-                          })
-                        }
-                      }}
-                      onMouseLeave={() => setMapTooltip(null)}
-                    />
-                  )
-                })
-              }
-            </Geographies>
-          </ZoomableGroup>
-        </ComposableMap>
-
-        {/* Tooltip */}
-        {mapTooltip && (
-          <div className="absolute top-4 right-4 bg-white rounded-xl
-                          shadow-lg border border-gray-100 p-4 min-w-48
-                          pointer-events-none">
-            <p className="font-bold text-blue-900 text-sm mb-1">
-              {mapTooltip.name}
-            </p>
-            <p className="text-xs text-gray-500 mb-0.5">
-              Chapter: {mapTooltip.chapters}
-            </p>
-            <p className="text-xs text-gray-500 mb-0.5">
-              Grants: <span className="font-semibold text-gray-700">
-                {mapTooltip.grants}
-              </span>
-            </p>
-            <p className="text-xs text-gray-500">
-              Total Value: <span className="font-semibold text-blue-700">
-                ${mapTooltip.value.toLocaleString(undefined, {
-                  maximumFractionDigits: 0
-                })}
-              </span>
-            </p>
-          </div>
-        )}
-
-        {/* Legend */}
-        <div className="absolute bottom-4 left-4 flex items-center gap-2">
-          <div className="flex items-center gap-1">
-            <div className="w-3 h-3 rounded-sm"
-                 style={{ background: '#6FA8D4' }}></div>
-            <span className="text-xs text-gray-400">Low</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <div className="w-3 h-3 rounded-sm"
-                 style={{ background: '#1D6FB8' }}></div>
-            <span className="text-xs text-gray-400">Medium</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <div className="w-3 h-3 rounded-sm"
-                 style={{ background: '#08325C' }}></div>
-            <span className="text-xs text-gray-400">High</span>
-          </div>
-        </div>
-      </div>
-    )
-  })()}
-</div>
-
-                  {/* Records by Country Bar Chart */}
-                  <div className="bg-white rounded-2xl border border-gray-100
-                                  shadow-sm p-6 mb-6">
-                    <div className="mb-4">
-                      <h3 className="font-bold text-gray-800 text-sm">
-                        Records by Country
-                      </h3>
-                      <p className="text-xs text-gray-400 mt-0.5">
-                        grant count per country
-                      </p>
-                    </div>
-                    {countryData.length === 0 ? (
-                      <div className="flex items-center justify-center
-                                      h-40 text-gray-300 text-sm">
-                        No data yet
-                      </div>
-                    ) : (
-                      <ResponsiveContainer width="100%" height={200}>
-                        <BarChart
-                          data={countryData}
-                          margin={{ top: 10, right: 10, left: -20, bottom: 40 }}
-                          barSize={32}
+                  {/* Map */}
+                  <Card
+                    className="mb-6"
+                    title="Where grants are deployed"
+                    subtitle="Darker countries hold more grant value. Scroll to zoom, drag to move."
+                    action={
+                      <button
+                        onClick={() => setMapZoom({ coordinates: [0, 20], zoom: 1 })}
+                        className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:bg-slate-50"
+                      >
+                        Reset view
+                      </button>
+                    }
+                  >
+                    <div className="relative overflow-hidden rounded-lg bg-brand-50/60" style={{ height: '400px' }}>
+                      <ComposableMap
+                        projection="geoMercator"
+                        projectionConfig={{ scale: 130, center: [10, 30] }}
+                        style={{ width: '100%', height: '100%' }}
+                      >
+                        <ZoomableGroup
+                          zoom={mapZoom.zoom}
+                          center={mapZoom.coordinates}
+                          onMoveEnd={({ coordinates, zoom }) => setMapZoom({ coordinates, zoom })}
+                          minZoom={0.5} maxZoom={8}
                         >
-                          <CartesianGrid strokeDasharray="3 3"
-                                         stroke="#f5f5f5" vertical={false} />
-                          <XAxis
-                            dataKey="name"
-                            tick={{ fontSize: 11, fill: '#5B6B82' }}
-                            angle={-25}
-                            textAnchor="end"
-                            interval={0}
-                            axisLine={false}
-                            tickLine={false}
-                          />
-                          <YAxis
-                            allowDecimals={false}
-                            tick={{ fontSize: 10, fill: '#9CA3AF' }}
-                            axisLine={false}
-                            tickLine={false}
-                          />
-                          <Tooltip
-                            contentStyle={{
-                              borderRadius: '10px', border: 'none',
-                              boxShadow: '0 4px 20px rgba(0,0,0,0.12)',
-                              fontSize: '12px'
-                            }}
-                            cursor={{ fill: 'rgba(0,0,0,0.04)' }}
-                          />
-                          <Bar dataKey="value" radius={[6, 6, 0, 0]}
-                               fill="#08325C">
-                            <LabelList
-                              dataKey="value" position="top"
-                              style={{
-                                fontSize: '11px', fill: '#5B6B82',
-                                fontWeight: 600
-                              }}
-                            />
+                          <Geographies geography={GEO_URL}>
+                            {({ geographies }) => geographies.map(geo => {
+                              const geoName = geo.properties.name
+                              const ourName = GEO_NAME_MAP[geoName]
+                              const isHighlighted = ourName && mapStats.values[ourName] !== undefined
+                              return (
+                                <Geography
+                                  key={geo.rsmKey}
+                                  geography={geo}
+                                  fill={mapFill(geoName, mapStats, activeChapter)}
+                                  stroke="#ffffff"
+                                  strokeWidth={0.5}
+                                  style={{
+                                    default: { outline: 'none' },
+                                    hover: {
+                                      fill: isHighlighted ? '#d97706' : '#d1dbe1',
+                                      outline: 'none',
+                                      cursor: isHighlighted ? 'pointer' : 'default',
+                                    },
+                                    pressed: { outline: 'none' },
+                                  }}
+                                  onMouseEnter={() => {
+                                    if (ourName && mapStats.counts[ourName]) {
+                                      setMapTooltip({
+                                        name: ourName,
+                                        grants: mapStats.counts[ourName],
+                                        value: mapStats.values[ourName] || 0,
+                                        chapters: mapStats.chapters[ourName]
+                                          ? [...mapStats.chapters[ourName]].join(', ') : '—',
+                                      })
+                                    }
+                                  }}
+                                  onMouseLeave={() => setMapTooltip(null)}
+                                />
+                              )
+                            })}
+                          </Geographies>
+                        </ZoomableGroup>
+                      </ComposableMap>
+
+                      {mapTooltip && (
+                        <div className="pointer-events-none absolute right-4 top-4 min-w-52 rounded-lg border border-slate-200 bg-white p-4 shadow-lg">
+                          <p className="mb-1.5 text-sm font-semibold text-slate-900">{mapTooltip.name}</p>
+                          <p className="text-xs text-slate-500">Chapter: <span className="font-medium text-slate-700">{mapTooltip.chapters}</span></p>
+                          <p className="text-xs text-slate-500">Grants: <span className="font-medium text-slate-700">{mapTooltip.grants}</span></p>
+                          <p className="text-xs text-slate-500">Total value: <span className="font-semibold text-brand-700">{usd0(mapTooltip.value)}</span></p>
+                        </div>
+                      )}
+
+                      <div className="absolute bottom-4 left-4 flex items-center gap-2 rounded-md bg-white/90 px-2.5 py-1.5 text-xs text-slate-500">
+                        <span>Lower</span>
+                        {['#8fc3d1', '#3f93ab', '#1f5668', '#163a47'].map(c => (
+                          <span key={c} className="h-2.5 w-5 rounded-sm" style={{ background: c }} />
+                        ))}
+                        <span>Higher</span>
+                      </div>
+                    </div>
+                  </Card>
+
+                  {/* Records by country */}
+                  <Card className="mb-6" title="Records by country" subtitle="Number of grants per country">
+                    {countryData.length === 0 ? <Empty>No data yet</Empty> : (
+                      <ResponsiveContainer width="100%" height={220}>
+                        <BarChart data={countryData} margin={{ top: 18, right: 10, left: -20, bottom: 30 }} barSize={34}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#eef2f5" vertical={false} />
+                          <XAxis dataKey="name" tick={{ fontSize: 12, fill: '#5b6b78' }}
+                                 angle={-20} textAnchor="end" interval={0} axisLine={false} tickLine={false} />
+                          <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: '#94a3b8' }}
+                                 axisLine={false} tickLine={false} />
+                          <Tooltip contentStyle={TOOLTIP_STYLE} cursor={{ fill: 'rgba(31,86,104,0.05)' }} />
+                          <Bar dataKey="value" radius={[5, 5, 0, 0]} fill="#1f5668">
+                            <LabelList dataKey="value" position="top"
+                                       style={{ fontSize: '12px', fill: '#475569', fontWeight: 600 }} />
                           </Bar>
                         </BarChart>
                       </ResponsiveContainer>
                     )}
-                  </div>
+                  </Card>
 
-                  {/* Grant Activity Line Chart */}
-                  <div className="bg-white rounded-2xl border border-gray-100
-                                  shadow-sm p-6 mb-6">
-                    <div className="flex justify-between items-start mb-4">
-                      <div>
-                        <h3 className="font-bold text-gray-800 text-sm">
-                          Grant Activity Over Time
-                        </h3>
-                        <p className="text-xs text-gray-400 mt-0.5">
-                          cumulative grants and payments by receiving date
-                        </p>
+                  {/* Activity */}
+                  <Card
+                    title="Grant activity over time"
+                    subtitle="Running totals by grant receiving date"
+                    action={
+                      <div className="flex gap-4 text-xs text-slate-500">
+                        <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full" style={{ background: BRAND_LINE }} />Grants</span>
+                        <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full" style={{ background: AMBER_LINE }} />Payments (USD)</span>
                       </div>
-                      <div className="flex gap-4">
-                        <div className="flex items-center gap-1.5">
-                          <div className="w-3 h-3 rounded-full bg-blue-600">
-                          </div>
-                          <span className="text-xs text-gray-500">Grants</span>
-                        </div>
-                        <div className="flex items-center gap-1.5">
-                          <div className="w-3 h-3 rounded-full bg-amber-400">
-                          </div>
-                          <span className="text-xs text-gray-500">
-                            Payment (USD)
-                          </span>
-                        </div>
-                      </div>
-                    </div>
+                    }
+                  >
                     {activityData.length < 2 ? (
-                      <div className="flex items-center justify-center
-                                      h-48 text-gray-300 text-sm">
-                        Add grants with different receiving dates to see activity
-                      </div>
+                      <Empty height="h-48">Add grants with different receiving dates to see activity over time.</Empty>
                     ) : (
-                      <ResponsiveContainer width="100%" height={260}>
-                        <ComposedChart
-                          data={activityData}
-                          margin={{ top: 10, right: 20, left: 0, bottom: 10 }}
-                        >
+                      <ResponsiveContainer width="100%" height={270}>
+                        <ComposedChart data={activityData} margin={{ top: 10, right: 20, left: 0, bottom: 10 }}>
                           <defs>
-                            <linearGradient id="grantsGrad"
-                              x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="5%" stopColor="#1D6FB8"
-                                stopOpacity={0.15}/>
-                              <stop offset="95%" stopColor="#1D6FB8"
-                                stopOpacity={0}/>
+                            <linearGradient id="grantsGrad" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor={BRAND_LINE} stopOpacity={0.18} />
+                              <stop offset="95%" stopColor={BRAND_LINE} stopOpacity={0} />
                             </linearGradient>
-                            <linearGradient id="paymentGrad"
-                              x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="5%" stopColor="#E8A916"
-                                stopOpacity={0.15}/>
-                              <stop offset="95%" stopColor="#E8A916"
-                                stopOpacity={0}/>
+                            <linearGradient id="paymentGrad" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor={AMBER_LINE} stopOpacity={0.14} />
+                              <stop offset="95%" stopColor={AMBER_LINE} stopOpacity={0} />
                             </linearGradient>
                           </defs>
-                          <CartesianGrid strokeDasharray="3 3"
-                                         stroke="#f0f0f0" vertical={false} />
-                          <XAxis
-                            dataKey="date"
-                            tick={{ fontSize: 10, fill: '#9CA3AF' }}
-                            axisLine={false}
-                            tickLine={false}
-                            interval="preserveStartEnd"
-                          />
-                          <YAxis yAxisId="left" orientation="left"
-                            allowDecimals={false}
-                            tick={{ fontSize: 10, fill: '#9CA3AF' }}
-                            axisLine={false} tickLine={false} width={30}
-                          />
+                          <CartesianGrid strokeDasharray="3 3" stroke="#eef2f5" vertical={false} />
+                          <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#94a3b8' }}
+                                 axisLine={false} tickLine={false} interval="preserveStartEnd"
+                                 tickFormatter={formatDate} />
+                          <YAxis yAxisId="left" orientation="left" allowDecimals={false}
+                                 tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} width={30} />
                           <YAxis yAxisId="right" orientation="right"
-                            tick={{ fontSize: 10, fill: '#9CA3AF' }}
-                            axisLine={false} tickLine={false} width={50}
-                            tickFormatter={v =>
-                              `$${(v / 1000).toFixed(0)}k`}
-                          />
+                                 tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} width={50}
+                                 tickFormatter={v => `$${(v / 1000).toFixed(0)}k`} />
                           <Tooltip
-                            contentStyle={{
-                              borderRadius: '10px', border: 'none',
-                              boxShadow: '0 4px 20px rgba(0,0,0,0.12)',
-                              fontSize: '12px', padding: '10px 14px'
-                            }}
+                            contentStyle={TOOLTIP_STYLE}
+                            labelFormatter={formatDate}
                             formatter={(value, name) => [
-                              name === 'payment'
-                                ? `$${value.toLocaleString()}` : value,
-                              name === 'payment' ? 'Payment USD' : 'Grants'
+                              name === 'payment' ? `$${value.toLocaleString()}` : value,
+                              name === 'payment' ? 'Payments (USD)' : 'Grants',
                             ]}
                           />
-                          <Area yAxisId="left" type="monotone"
-                            dataKey="grants" stroke="#1D6FB8"
-                            strokeWidth={2.5}
-                            fill="url(#grantsGrad)"
-                            dot={{ fill: '#1D6FB8', r: 4, strokeWidth: 0 }}
-                            activeDot={{
-                              r: 6, fill: '#1D6FB8', strokeWidth: 0
-                            }}
-                          />
-                          <Area yAxisId="right" type="monotone"
-                            dataKey="payment" stroke="#E8A916"
-                            strokeWidth={2.5}
-                            fill="url(#paymentGrad)"
-                            dot={{ fill: '#E8A916', r: 4, strokeWidth: 0 }}
-                            activeDot={{
-                              r: 6, fill: '#E8A916', strokeWidth: 0
-                            }}
-                          />
+                          <Area yAxisId="left" type="monotone" dataKey="grants" stroke={BRAND_LINE} strokeWidth={2.5}
+                                fill="url(#grantsGrad)" dot={{ fill: BRAND_LINE, r: 4, strokeWidth: 0 }}
+                                activeDot={{ r: 6, fill: BRAND_LINE, strokeWidth: 0 }} />
+                          <Area yAxisId="right" type="monotone" dataKey="payment" stroke={AMBER_LINE} strokeWidth={2.5}
+                                fill="url(#paymentGrad)" dot={{ fill: AMBER_LINE, r: 4, strokeWidth: 0 }}
+                                activeDot={{ r: 6, fill: AMBER_LINE, strokeWidth: 0 }} />
                         </ComposedChart>
                       </ResponsiveContainer>
                     )}
-                  </div>
+                  </Card>
                 </>
               )}
             </>
           )}
 
-          {/* ── RECORDS VIEW ────────────────────────────────────── */}
+          {/* ═══ RECORDS VIEW ═══ */}
           {activeNav === 'records' && (
             <>
-              <div className="flex justify-between items-end mb-6">
+              <div className="mb-6 flex items-end justify-between gap-4">
                 <div>
-                  <h1 className="text-2xl font-bold text-gray-800"
-                      style={{ fontFamily: 'Georgia, serif' }}>
-                    Records
-                  </h1>
-                  <p className="text-sm text-gray-500 mt-1">
-                    {data?.total_grants || 0} total grants
+                  <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Records</h1>
+                  <p className="mt-1 text-sm text-slate-500">
+                    {data?.total_grants || 0} grants in the ledger
                   </p>
                 </div>
                 <button
                   onClick={() => navigate('/add-grant')}
-                  className="bg-blue-700 text-white text-sm px-4 py-2
-                             rounded-lg hover:bg-blue-800 transition"
+                  className="flex items-center gap-2 rounded-lg bg-brand-700 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-brand-800"
                 >
-                  + Add Grant
+                  <Icon name="plus" className="h-4 w-4" /> Add grant
                 </button>
               </div>
 
-              {/* Filters */}
               {data && (
-                <div className="flex flex-wrap gap-3 mb-6">
-                  <select
-                    value={filterCountry}
-                    onChange={e => setFilterCountry(e.target.value)}
-                    className="border border-gray-200 rounded-lg px-3 py-2
-                               text-sm text-gray-600 bg-white focus:outline-none
-                               focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="">All countries</option>
-                    {COUNTRIES.map(c => (
-                      <option key={c} value={c}>{c}</option>
-                    ))}
-                  </select>
-
-                  <select
-                    value={filterChapter}
-                    onChange={e => setFilterChapter(e.target.value)}
-                    className="border border-gray-200 rounded-lg px-3 py-2
-                               text-sm text-gray-600 bg-white focus:outline-none
-                               focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="">All chapters</option>
-                    {CHAPTERS.map(c => (
-                      <option key={c} value={c}>{c}</option>
-                    ))}
-                  </select>
-
-                  <select
-                    value={filterDept}
-                    onChange={e => setFilterDept(e.target.value)}
-                    className="border border-gray-200 rounded-lg px-3 py-2
-                               text-sm text-gray-600 bg-white focus:outline-none
-                               focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="">All departments</option>
-                    {[...new Set(
-                      data.grants.map(g => g.department).filter(Boolean)
-                    )].map(d => (
-                      <option key={d} value={d}>{d}</option>
-                    ))}
-                  </select>
-
-                  <select
-                    value={filterPayment}
-                    onChange={e => setFilterPayment(e.target.value)}
-                    className="border border-gray-200 rounded-lg px-3 py-2
-                               text-sm text-gray-600 bg-white focus:outline-none
-                               focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="">All payment statuses</option>
-                    {['Pending', 'Partial', 'Complete'].map(s => (
-                      <option key={s} value={s}>{s}</option>
-                    ))}
-                  </select>
-
-                  <select
-                    value={filterReport}
-                    onChange={e => setFilterReport(e.target.value)}
-                    className="border border-gray-200 rounded-lg px-3 py-2
-                               text-sm text-gray-600 bg-white focus:outline-none
-                               focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="">All report statuses</option>
-                    {['Complete', 'Pending', 'Incomplete Information'].map(s => (
-                      <option key={s} value={s}>{s}</option>
-                    ))}
-                  </select>
-
+                <div className="mb-5 flex flex-wrap items-center gap-3">
+                  <FilterSelect value={filterCountry} onChange={setFilterCountry} placeholder="All countries" options={COUNTRIES} />
+                  <FilterSelect value={filterChapter} onChange={setFilterChapter} placeholder="All chapters" options={CHAPTERS} />
+                  <FilterSelect value={filterDept} onChange={setFilterDept} placeholder="All departments"
+                                options={[...new Set(data.grants.map(g => g.department).filter(Boolean))]} />
+                  <FilterSelect value={filterPayment} onChange={setFilterPayment} placeholder="All payment statuses"
+                                options={['Pending', 'Partial', 'Complete']} />
+                  <FilterSelect value={filterReport} onChange={setFilterReport} placeholder="All report statuses"
+                                options={['Complete', 'Pending', 'Incomplete Information']} />
                   <input
-                    type="text"
-                    value={filterSearch}
-                    onChange={e => setFilterSearch(e.target.value)}
-                    placeholder="Search grant #, supplier, item..."
-                    className="border border-gray-200 rounded-lg px-3 py-2
-                               text-sm text-gray-500 bg-white focus:outline-none
-                               focus:ring-2 focus:ring-blue-500 min-w-64"
+                    type="search" value={filterSearch} onChange={e => setFilterSearch(e.target.value)}
+                    placeholder="Search grant number, supplier or item"
+                    className="min-w-64 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700
+                               placeholder:text-slate-400 focus:border-brand-500 focus:outline-none focus:ring-4 focus:ring-brand-100"
                   />
-
-                  {(filterCountry || filterChapter || filterDept ||
-                    filterPayment || filterReport || filterSearch) && (
-                    <button
-                      onClick={() => {
-                        setFilterCountry('')
-                        setFilterChapter('')
-                        setFilterDept('')
-                        setFilterPayment('')
-                        setFilterReport('')
-                        setFilterSearch('')
-                      }}
-                      className="text-sm text-red-500 hover:text-red-700 px-3"
-                    >
+                  {anyFilter && (
+                    <button onClick={clearFilters} className="px-2 text-sm font-medium text-brand-700 hover:text-brand-900">
                       Clear filters
                     </button>
                   )}
                 </div>
               )}
 
-              {loading && (
-                <p className="text-gray-400 text-center py-12">
-                  Loading grants...
-                </p>
+              {loading && <p className="py-12 text-center text-slate-400">Loading grants…</p>}
+              {error && !data && (
+                <div role="alert" className="mb-6 flex items-center justify-between gap-4 rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
+                  <span>{error}</span>
+                  <button onClick={fetchGrants} className="font-semibold underline">Try again</button>
+                </div>
               )}
 
               {!loading && data && (
-                <div className="bg-white rounded-xl border border-gray-200
-                                overflow-hidden">
-                  <div className="flex justify-between items-center px-6 py-4
-                                  border-b border-gray-100">
-                    <h2 className="font-semibold text-gray-700">All Grants</h2>
-                    <button
-                      onClick={fetchGrants}
-                      className="text-sm text-blue-600 hover:text-blue-800"
-                    >
+                <section className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+                  <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3.5">
+                    <p className="text-sm text-slate-600">
+                      Showing <span className="font-semibold text-slate-900">{recordRows.length}</span> of {data.grants.length}
+                    </p>
+                    <button onClick={fetchGrants} className="text-sm font-medium text-brand-700 hover:text-brand-900">
                       Refresh
                     </button>
                   </div>
 
                   {data.grants.length === 0 ? (
-                    <div className="text-center py-16 text-gray-400">
-                      No grants yet. Click "+ Add Grant" to get started.
+                    <div className="px-6 py-16 text-center text-slate-500">
+                      No grants yet. Select <span className="font-medium text-slate-700">Add grant</span> to enter the first one.
                     </div>
                   ) : (
-                    <div className="overflow-x-auto">
-                      <table className="text-sm"
-                             style={{ minWidth: '1600px' }}>
-                        <thead className="bg-gray-50 text-gray-500
-                                          uppercase text-xs">
-                          <tr>
-                            <th className="px-4 py-3 text-left whitespace-nowrap">
-                              Grant #
-                            </th>
-                            <th className="px-4 py-3 text-left whitespace-nowrap">
-                              Country
-                            </th>
-                            <th className="px-4 py-3 text-left whitespace-nowrap">
-                              Chapter
-                            </th>
-                            <th className="px-4 py-3 text-left whitespace-nowrap">
-                              Supplier
-                            </th>
-                            <th className="px-4 py-3 text-left whitespace-nowrap">
-                              Item
-                            </th>
-                            <th className="px-4 py-3 text-left whitespace-nowrap">
-                              Department
-                            </th>
-                            <th className="px-4 py-3 text-left whitespace-nowrap">
-                              Project Type
-                            </th>
-                            <th className="px-4 py-3 text-right whitespace-nowrap">
-                              Total Grant (USD)
-                            </th>
-                            <th className="px-4 py-3 text-right whitespace-nowrap">
-                              Payment (USD)
-                            </th>
-                            <th className="px-4 py-3 text-right whitespace-nowrap">
-                              Remaining
-                            </th>
-                            <th className="px-4 py-3 text-center whitespace-nowrap">
-                              Payment
-                            </th>
-                            <th className="px-4 py-3 text-center whitespace-nowrap">
-                              Report
-                            </th>
-                            <th className="px-4 py-3 text-center whitespace-nowrap">
-                              Shipping
-                            </th>
-                            <th className="px-4 py-3 text-left whitespace-nowrap">
-                              Location
-                            </th>
-                            <th className="px-4 py-3 text-center whitespace-nowrap">
-                              Actions
-                            </th>
+                    <div className="max-h-[68vh] overflow-auto">
+                      <table className="w-full text-sm" style={{ minWidth: '1600px' }}>
+                        <thead>
+                          <tr className="border-b border-slate-200 text-left">
+                            <th className={th}>Grant number</th>
+                            <th className={th}>Country</th>
+                            <th className={th}>Chapter</th>
+                            <th className={th}>Supplier</th>
+                            <th className={th}>Item</th>
+                            <th className={th}>Department</th>
+                            <th className={th}>Project type</th>
+                            <th className={`${th} text-right`}>Total grant (USD)</th>
+                            <th className={`${th} text-right`}>Payment (USD)</th>
+                            <th className={`${th} text-right`}>Remaining (USD)</th>
+                            <th className={th}>Payment</th>
+                            <th className={th}>Report</th>
+                            <th className={th}>Shipping</th>
+                            <th className={th}>Location</th>
+                            <th className={`${th} text-right`}>Actions</th>
                           </tr>
                         </thead>
-                        <tbody className="divide-y divide-gray-100">
-                          {data.grants
-                            .filter(g => !filterCountry ||
-                              g.country === filterCountry)
-                            .filter(g => !filterChapter ||
-                              g.chapter === filterChapter)
-                            .filter(g => !filterDept ||
-                              g.department === filterDept)
-                            .filter(g => !filterPayment ||
-                              g.payment_status === filterPayment)
-                            .filter(g => !filterReport ||
-                              g.report_status === filterReport)
-                            .filter(g => !filterSearch ||
-                              g.grant_number?.toLowerCase().includes(
-                                filterSearch.toLowerCase()) ||
-                              g.supplier?.toLowerCase().includes(
-                                filterSearch.toLowerCase()) ||
-                              g.item?.toLowerCase().includes(
-                                filterSearch.toLowerCase())
-                            )
-                            .map((grant) => (
-                              <tr
-                                key={grant.grant_number}
-                                className="hover:bg-gray-50 cursor-pointer"
-                                onClick={() => setDetailGrant(grant)}
-                              >
-                                <td className="px-4 py-3 font-mono text-xs
-                                               text-gray-700 whitespace-nowrap">
-                                  {grant.grant_number}
-                                </td>
-                                <td className="px-4 py-3 text-xs text-gray-600
-                                               whitespace-nowrap">
-                                  {grant.country}
-                                </td>
-                                <td className="px-4 py-3 text-xs text-gray-600
-                                               whitespace-nowrap">
-                                  {grant.chapter}
-                                </td>
-                                <td className="px-4 py-3 text-sm text-gray-700
-                                               whitespace-nowrap">
-                                  {grant.supplier}
-                                </td>
-                                <td className="px-4 py-3 text-sm text-gray-600
-                                               whitespace-nowrap max-w-48
-                                               truncate">
-                                  {grant.item}
-                                </td>
-                                <td className="px-4 py-3 text-xs text-gray-600
-                                               whitespace-nowrap">
-                                  {grant.department}
-                                </td>
-                                <td className="px-4 py-3 text-xs text-gray-500
-                                               whitespace-nowrap">
-                                  {grant.project_type || '—'}
-                                </td>
-                                <td className="px-4 py-3 text-right font-mono
-                                               text-xs text-gray-800
-                                               whitespace-nowrap">
-                                  {grant.total_grant_amount_usd
-                                    ? `$${Number(grant.total_grant_amount_usd
-                                      ).toLocaleString()}`
-                                    : '—'}
-                                </td>
-                                <td className="px-4 py-3 text-right font-mono
-                                               text-xs text-gray-800
-                                               whitespace-nowrap">
-                                  {grant.current_payment_usd
-                                    ? `$${Number(grant.current_payment_usd
-                                      ).toLocaleString()}`
-                                    : '—'}
-                                </td>
-                                <td className="px-4 py-3 text-right font-mono
-                                               text-xs text-amber-600
-                                               whitespace-nowrap">
-                                  {grant.remaining_payment_usd
-                                    ? `$${Number(grant.remaining_payment_usd
-                                      ).toLocaleString()}`
-                                    : '—'}
-                                </td>
-                                <td className="px-4 py-3 text-center
-                                               whitespace-nowrap">
-                                  <span className={`px-2 py-1 rounded-full
-                                    text-xs font-medium
-                                    ${pillColor(grant.payment_status)}`}>
-                                    {grant.payment_status}
-                                  </span>
-                                </td>
-                                <td className="px-4 py-3 text-center
-                                               whitespace-nowrap">
-                                  <span className={`px-2 py-1 rounded-full
-                                    text-xs font-medium
-                                    ${pillColor(grant.report_status)}`}>
-                                    {grant.report_status}
-                                  </span>
-                                </td>
-                                <td className="px-4 py-3 text-center
-                                               whitespace-nowrap">
-                                  <span className={`px-2 py-1 rounded-full
-                                    text-xs font-medium
-                                    ${pillColor(
-                                      grant.shipping_documents_status)}`}>
-                                    {grant.shipping_documents_status || '—'}
-                                  </span>
-                                </td>
-                                <td className="px-4 py-3 text-xs text-gray-500
-                                               whitespace-nowrap">
-                                  {grant.location || '—'}
-                                </td>
-                                <td className="px-4 py-3 text-center
-                                               whitespace-nowrap"
-                                    onClick={e => e.stopPropagation()}>
-                                  <div className="flex gap-2 justify-center">
-                                    <button
-                                      onClick={() => navigate(
-                                        `/edit-grant/${grant.grant_number}`
-                                      )}
-                                      className="text-xs px-3 py-1 rounded
-                                                 border border-gray-300
-                                                 text-gray-600
-                                                 hover:bg-gray-100 transition"
-                                    >
-                                      Edit
-                                    </button>
-                                    <button
-                                      onClick={() => setSelectedGrant(grant)}
-                                      className="text-xs px-3 py-1 rounded
-                                                 bg-blue-700 text-white
-                                                 hover:bg-blue-800 transition"
-                                    >
-                                      Report
-                                    </button>
-                                  </div>
-                                </td>
-                              </tr>
-                            ))}
+                        <tbody className="divide-y divide-slate-100">
+                          {recordRows.length === 0 && (
+                            <tr>
+                              <td colSpan={15} className="px-6 py-12 text-center text-slate-500">
+                                No grants match these filters.{' '}
+                                <button onClick={clearFilters} className="font-medium text-brand-700 underline">Clear filters</button>
+                              </td>
+                            </tr>
+                          )}
+                          {recordRows.map(grant => (
+                            <tr
+                              key={grant.grant_number}
+                              className="cursor-pointer transition hover:bg-brand-50/60"
+                              onClick={() => setDetailGrant(grant)}
+                            >
+                              <td className="whitespace-nowrap px-4 py-3 font-medium text-brand-800">{grant.grant_number}</td>
+                              <td className="whitespace-nowrap px-4 py-3 text-slate-600">{grant.country}</td>
+                              <td className="whitespace-nowrap px-4 py-3 text-slate-600">{grant.chapter}</td>
+                              <td className="whitespace-nowrap px-4 py-3 text-slate-800">{grant.supplier}</td>
+                              <td className="max-w-56 truncate whitespace-nowrap px-4 py-3 text-slate-600">{grant.item}</td>
+                              <td className="whitespace-nowrap px-4 py-3 text-slate-600">{grant.department}</td>
+                              <td className="whitespace-nowrap px-4 py-3 text-slate-500">{grant.project_type || '—'}</td>
+                              <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums text-slate-900">{usd(grant.total_grant_amount_usd)}</td>
+                              <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums text-slate-900">{usd(grant.current_payment_usd)}</td>
+                              <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums text-amber-700">{usd(grant.remaining_payment_usd)}</td>
+                              <td className="whitespace-nowrap px-4 py-3"><StatusPill value={grant.payment_status} /></td>
+                              <td className="whitespace-nowrap px-4 py-3"><StatusPill value={grant.report_status} /></td>
+                              <td className="whitespace-nowrap px-4 py-3"><StatusPill value={grant.shipping_documents_status} /></td>
+                              <td className="whitespace-nowrap px-4 py-3 text-slate-500">{grant.location || '—'}</td>
+                              <td className="whitespace-nowrap px-4 py-3 text-right" onClick={e => e.stopPropagation()}>
+                                <div className="flex justify-end gap-2">
+                                  <button
+                                    onClick={() => navigate(`/edit-grant/${grant.grant_number}`)}
+                                    className="rounded-md border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 transition hover:bg-slate-50"
+                                  >
+                                    Edit
+                                  </button>
+                                  <button
+                                    onClick={() => setSelectedGrant(grant)}
+                                    className="rounded-md bg-brand-700 px-3 py-1 text-xs font-medium text-white transition hover:bg-brand-800"
+                                  >
+                                    Report
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
                         </tbody>
                       </table>
                     </div>
                   )}
-                </div>
+                </section>
               )}
             </>
           )}
-
         </div>
       </div>
 
-      {/* ── Detail Modal ─────────────────────────────────────────── */}
-      {detailGrant && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex
-                        items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl
-                          max-h-screen overflow-y-auto">
-            <div className="sticky top-0 bg-white border-b border-gray-100
-                            px-6 py-4 flex justify-between items-start
-                            rounded-t-2xl z-10">
-              <div>
-                <h2 className="text-lg font-bold text-blue-900">
-                  {detailGrant.grant_number}
-                </h2>
-                <p className="text-sm text-gray-500 mt-0.5">
-                  {detailGrant.supplier} · {detailGrant.item}
-                </p>
+      {/* ── Detail modal ──────────────────────────────────────────── */}
+      {detailGrant && (() => {
+        const g = detailGrant
+        const currency = g.secondary_currency || 'USD'
+        const orig = v => (v ? `${currency} ${Number(v).toLocaleString()}` : '—')
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm"
+               onClick={() => setDetailGrant(null)}>
+            <div className="flex max-h-[92vh] w-full max-w-3xl flex-col rounded-2xl bg-white shadow-2xl"
+                 role="dialog" aria-modal="true" aria-label={`Grant ${g.grant_number}`}
+                 onClick={e => e.stopPropagation()}>
+              <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-4">
+                <div className="min-w-0">
+                  <h2 className="truncate text-lg font-semibold text-slate-900">{g.grant_number}</h2>
+                  <p className="mt-0.5 truncate text-sm text-slate-500">{g.supplier} — {g.item}</p>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <button
+                    onClick={() => { setDetailGrant(null); navigate(`/edit-grant/${g.grant_number}`) }}
+                    className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+                  >
+                    Edit
+                  </button>
+                  <button
+                    onClick={() => { setSelectedGrant(g); setDetailGrant(null) }}
+                    className="rounded-lg bg-brand-700 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-brand-800"
+                  >
+                    Generate report
+                  </button>
+                  <button
+                    onClick={() => setDetailGrant(null)} aria-label="Close"
+                    className="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+                  >
+                    <Icon name="close" className="h-5 w-5" />
+                  </button>
+                </div>
               </div>
-              <div className="flex gap-2 ml-4 flex-shrink-0">
-                <button
-                  onClick={() => {
-                    setDetailGrant(null)
-                    navigate(`/edit-grant/${detailGrant.grant_number}`)
-                  }}
-                  className="text-xs px-3 py-1.5 rounded-lg border
-                             border-gray-300 text-gray-600
-                             hover:bg-gray-50 transition"
-                >
-                  Edit
-                </button>
-                <button
-                  onClick={() => {
-                    setSelectedGrant(detailGrant)
-                    setDetailGrant(null)
-                  }}
-                  className="text-xs px-3 py-1.5 rounded-lg bg-blue-700
-                             text-white hover:bg-blue-800 transition"
-                >
-                  Generate Report
-                </button>
-                <button
-                  onClick={() => setDetailGrant(null)}
-                  className="text-xs px-3 py-1.5 rounded-lg border
-                             border-gray-200 text-gray-400
-                             hover:bg-gray-50 transition"
-                >
-                  ✕
-                </button>
+
+              <div className="space-y-8 overflow-y-auto px-6 py-6">
+                <DetailSection title="Grant overview">
+                  <DetailField label="Year" value={g.year} />
+                  <DetailField label="Country" value={g.country} />
+                  <DetailField label="Chapter" value={g.chapter} />
+                  <DetailField label="Project type" value={g.project_type} />
+                  <DetailField label="Department" value={g.department} />
+                  <DetailField label="Supplier" value={g.supplier} />
+                  <DetailField label="Item" value={g.item} />
+                  <DetailField label="PO / WO number" value={g.po_wo_number} />
+                  <DetailField label="Sub grant no." value={g.sub_grant_no} />
+                  <DetailLink label="Complete documents" value={g.link_to_complete_documents} />
+                </DetailSection>
+
+                <DetailSection title="Financial summary">
+                  <DetailField label="Secondary currency" value={currency} />
+                  <DetailField label={`Total grant (${currency})`} value={orig(g.total_grant_amount_orig)} />
+                  <DetailField label="Total grant (USD)" value={usd(g.total_grant_amount_usd)} tone="text-brand-700" />
+                  <DetailField label={`Current payment (${currency})`} value={orig(g.current_payment_orig)} />
+                  <DetailField label="Current payment (USD)" value={usd(g.current_payment_usd)} tone="text-emerald-700" />
+                  <DetailField label="Remaining (USD)" value={usd(g.remaining_payment_usd)} tone="text-amber-700" />
+                  <DetailStatus label="Payment status" value={g.payment_status} />
+                  <DetailLink label="Payment reference" value={g.payment_reference} />
+                </DetailSection>
+
+                <DetailSection title="Key dates">
+                  <DetailField label="Grant receiving date" value={formatDate(g.grant_receiving_date)} />
+                  <DetailField label="Application sent" value={formatDate(g.grant_application_sent_date)} />
+                  <DetailField label="Dr. Zafar signed" value={formatDate(g.date_dr_zafar_signed_application)} />
+                  <DetailField label="CEO signed" value={formatDate(g.date_ceo_signed_application)} />
+                  <DetailField label="Khaleeq Sb approval" value={formatDate(g.date_of_approval_by_khaleeq_sb)} />
+                  <DetailField label="Email to int. chapter" value={formatDate(g.date_of_email_to_int_chapter)} />
+                  <DetailField label="Payment date" value={formatDate(g.payment_date)} />
+                </DetailSection>
+
+                <DetailSection title="Shipping & documents">
+                  <DetailStatus label="Shipping status" value={g.shipping_documents_status} />
+                  <DetailField label="Commercial invoice" value={g.commercial_invoice_no} />
+                  <DetailField label="Bill of lading" value={g.bill_of_lading} />
+                  <DetailField label="Packing list ref." value={g.packing_list_reference} />
+                  <DetailLink label="Shipping documents" value={g.link_to_shipping_documents} />
+                  {g.shipping_documents_comment && (
+                    <Note title="Shipping comment" tone="amber">{g.shipping_documents_comment}</Note>
+                  )}
+                </DetailSection>
+
+                <DetailSection title="GRN / receiving">
+                  <DetailStatus label="GRN status" value={g.grn_receiving_status} />
+                  <DetailField label="Receiving date" value={formatDate(g.receiving_date)} />
+                  <DetailField label="GRN number" value={g.grn_number} />
+                  <DetailLink label="Link to GRN" value={g.link_to_grn} />
+                  {g.grn_receiving_comments && <Note title="GRN comments">{g.grn_receiving_comments}</Note>}
+                </DetailSection>
+
+                <DetailSection title="Installation & location">
+                  <DetailField label="Installation date" value={formatDate(g.installation_date)} />
+                  <DetailField label="Location" value={g.location} />
+                  <DetailField label="Building name" value={g.building_name} />
+                  <DetailField label="Floor" value={g.floor} />
+                  <DetailField label="Room" value={g.room} />
+                </DetailSection>
+
+                <DetailSection title="Item details">
+                  <DetailField label="Item model" value={g.item_model} />
+                  <DetailField label="Serial number" value={g.item_serial_number} />
+                  <DetailField label="Quantity" value={g.quantity} />
+                  <DetailField label="IHHN asset tag" value={g.ihhn_asset_tag_number} />
+                  <DetailField label="Beneficiaries" value={g.no_of_beneficiaries} />
+                  {g.item_description && <Note title="Item description" tone="brand">{g.item_description}</Note>}
+                </DetailSection>
+
+                <DetailSection title="Pictures">
+                  <DetailStatus label="Pictures status" value={g.pictures_status} />
+                  <DetailField label="Department for pictures" value={g.department_for_pictures} />
+                  <DetailLink label="Picture" value={g.picture} />
+                </DetailSection>
+
+                <DetailSection title="Report">
+                  <DetailStatus label="Report status" value={g.report_status} />
+                  <DetailLink label="Utilization report" value={g.link_to_utilization_report} />
+                </DetailSection>
               </div>
-            </div>
-
-            <div className="px-6 py-5 space-y-6">
-              {(() => {
-                function Field({ label, value, color }) {
-                  return (
-                    <div className="flex gap-3">
-                      <span className="text-xs text-gray-400 w-44
-                                       flex-shrink-0 pt-0.5">
-                        {label}
-                      </span>
-                      <span className={`text-sm font-medium
-                        ${color || 'text-gray-800'}`}>
-                        {value || '—'}
-                      </span>
-                    </div>
-                  )
-                }
-
-                function StatusBadge({ value }) {
-                  const green = ['Complete', 'Received', 'Paid']
-                  const red = ['Not received', 'Received with discrepancy',
-                    'Incomplete Information']
-                  const gray = ['Not required', 'Not applicable']
-                  if (!value) return (
-                    <span className="text-sm text-gray-400">—</span>
-                  )
-                  const cls = green.includes(value)
-                    ? 'bg-blue-100 text-blue-700'
-                    : red.includes(value)
-                    ? 'bg-red-100 text-red-700'
-                    : gray.includes(value)
-                    ? 'bg-gray-100 text-gray-500'
-                    : 'bg-amber-100 text-amber-700'
-                  return (
-                    <span className={`text-xs px-2 py-1 rounded-full
-                                     font-medium ${cls}`}>
-                      {value}
-                    </span>
-                  )
-                }
-
-                function Section({ title, children }) {
-                  return (
-                    <div>
-                      <h3 className="text-xs font-bold text-blue-800
-                                     uppercase tracking-widest mb-3 pb-2
-                                     border-b border-gray-100">
-                        {title}
-                      </h3>
-                      <div className="space-y-2.5">{children}</div>
-                    </div>
-                  )
-                }
-
-                function LinkRow({ label, value }) {
-                  return (
-                    <div className="flex gap-3 items-center">
-                      <span className="text-xs text-gray-400 w-44
-                                       flex-shrink-0">
-                        {label}
-                      </span>
-                      {value ? (
-                        <a href={value} target="_blank" rel="noreferrer"
-                           className="text-sm text-blue-600 hover:underline
-                                      flex items-center gap-1">
-                          Open link ↗
-                        </a>
-                      ) : (
-                        <span className="text-sm text-gray-400">—</span>
-                      )}
-                    </div>
-                  )
-                }
-
-                const g = detailGrant
-                const currency = g.secondary_currency || 'USD'
-
-                return (
-                  <>
-                    <Section title="Grant Overview">
-                      <Field label="Country" value={g.country} />
-                      <Field label="Chapter" value={g.chapter} />
-                      <Field label="Grant Number" value={g.grant_number} />
-                      <Field label="Project Type" value={g.project_type} />
-                      <Field label="Department" value={g.department} />
-                      <Field label="Supplier" value={g.supplier} />
-                      <Field label="Item" value={g.item} />
-                      <Field label="PO / WO Number" value={g.po_wo_number} />
-                      <Field label="Sub Grant No." value={g.sub_grant_no} />
-                      <LinkRow label="Complete Documents"
-                        value={g.link_to_complete_documents} />
-                    </Section>
-
-                    <Section title="Financial Summary">
-                      <Field label="Secondary Currency" value={currency} />
-                      <Field
-                        label={`Total Grant (${currency})`}
-                        value={g.total_grant_amount_orig
-                          ? `${currency} ${Number(
-                            g.total_grant_amount_orig).toLocaleString()}`
-                          : '—'}
-                      />
-                      <Field
-                        label="Total Grant (USD)"
-                        value={g.total_grant_amount_usd
-                          ? `$${Number(
-                            g.total_grant_amount_usd).toLocaleString()}`
-                          : '—'}
-                        color="text-blue-700"
-                      />
-                      <Field
-                        label={`Current Payment (${currency})`}
-                        value={g.current_payment_orig
-                          ? `${currency} ${Number(
-                            g.current_payment_orig).toLocaleString()}`
-                          : '—'}
-                      />
-                      <Field
-                        label="Current Payment (USD)"
-                        value={g.current_payment_usd
-                          ? `$${Number(
-                            g.current_payment_usd).toLocaleString()}`
-                          : '—'}
-                        color="text-green-700"
-                      />
-                      <Field
-                        label="Remaining (USD)"
-                        value={g.remaining_payment_usd
-                          ? `$${Number(
-                            g.remaining_payment_usd).toLocaleString()}`
-                          : '—'}
-                        color="text-amber-600"
-                      />
-                      <div className="flex gap-3 items-center">
-                        <span className="text-xs text-gray-400 w-44
-                                         flex-shrink-0">
-                          Payment Status
-                        </span>
-                        <StatusBadge value={g.payment_status} />
-                      </div>
-                      <LinkRow label="Payment Reference"
-                        value={g.payment_reference} />
-                    </Section>
-
-                    <Section title="Key Dates">
-                      <Field label="Grant Receiving Date"
-                        value={g.grant_receiving_date} />
-                      <Field label="Application Sent"
-                        value={g.grant_application_sent_date} />
-                      <Field label="Dr. Zafar Signed"
-                        value={g.date_dr_zafar_signed_application} />
-                      <Field label="CEO Signed"
-                        value={g.date_ceo_signed_application} />
-                      <Field label="Khaleeq Sb Approval"
-                        value={g.date_of_approval_by_khaleeq_sb} />
-                      <Field label="Email to Int. Chapter"
-                        value={g.date_of_email_to_int_chapter} />
-                      <Field label="Payment Date" value={g.payment_date} />
-                    </Section>
-
-                    <Section title="Shipping & Documents">
-                      <div className="flex gap-3 items-center">
-                        <span className="text-xs text-gray-400 w-44
-                                         flex-shrink-0">
-                          Shipping Status
-                        </span>
-                        <StatusBadge value={g.shipping_documents_status} />
-                      </div>
-                      <Field label="Commercial Invoice"
-                        value={g.commercial_invoice_no} />
-                      <Field label="Bill of Lading"
-                        value={g.bill_of_lading} />
-                      <Field label="Packing List Ref."
-                        value={g.packing_list_reference} />
-                      <LinkRow label="Shipping Documents"
-                        value={g.link_to_shipping_documents} />
-                      {g.shipping_documents_comment && (
-                        <div className="bg-amber-50 border border-amber-100
-                                        rounded-lg p-3 mt-2">
-                          <p className="text-xs text-amber-700 font-medium
-                                        mb-1">
-                            Shipping Comment
-                          </p>
-                          <p className="text-sm text-gray-700">
-                            {g.shipping_documents_comment}
-                          </p>
-                        </div>
-                      )}
-                    </Section>
-
-                    <Section title="GRN / Receiving">
-                      <div className="flex gap-3 items-center">
-                        <span className="text-xs text-gray-400 w-44
-                                         flex-shrink-0">
-                          GRN Status
-                        </span>
-                        <StatusBadge value={g.grn_receiving_status} />
-                      </div>
-                      <Field label="Receiving Date"
-                        value={g.receiving_date} />
-                      <Field label="GRN Number" value={g.grn_number} />
-                      <LinkRow label="Link to GRN" value={g.link_to_grn} />
-                      {g.grn_receiving_comments && (
-                        <div className="bg-gray-50 border border-gray-100
-                                        rounded-lg p-3 mt-2">
-                          <p className="text-xs text-gray-500 font-medium
-                                        mb-1">
-                            GRN Comments
-                          </p>
-                          <p className="text-sm text-gray-700">
-                            {g.grn_receiving_comments}
-                          </p>
-                        </div>
-                      )}
-                    </Section>
-
-                    <Section title="Installation & Location">
-                      <Field label="Installation Date"
-                        value={g.installation_date} />
-                      <Field label="Location" value={g.location} />
-                      <Field label="Building Name"
-                        value={g.building_name} />
-                      <Field label="Floor" value={g.floor} />
-                      <Field label="Room" value={g.room} />
-                    </Section>
-
-                    <Section title="Item Details">
-                      <Field label="Item Model" value={g.item_model} />
-                      <Field label="Serial Number"
-                        value={g.item_serial_number} />
-                      <Field label="Quantity" value={g.quantity} />
-                      <Field label="IHHN Asset Tag"
-                        value={g.ihhn_asset_tag_number} />
-                      <Field label="No. of Beneficiaries"
-                        value={g.no_of_beneficiaries} />
-                      {g.item_description && (
-                        <div className="bg-blue-50 border border-blue-100
-                                        rounded-lg p-3 mt-2">
-                          <p className="text-xs text-blue-700 font-medium
-                                        mb-1">
-                            Item Description
-                          </p>
-                          <p className="text-sm text-gray-700">
-                            {g.item_description}
-                          </p>
-                        </div>
-                      )}
-                    </Section>
-
-                    <Section title="Pictures">
-                      <div className="flex gap-3 items-center">
-                        <span className="text-xs text-gray-400 w-44
-                                         flex-shrink-0">
-                          Pictures Status
-                        </span>
-                        <StatusBadge value={g.pictures_status} />
-                      </div>
-                      <Field label="Department for Pictures"
-                        value={g.department_for_pictures} />
-                      <LinkRow label="Picture" value={g.picture} />
-                    </Section>
-
-                    <Section title="Report">
-                      <div className="flex gap-3 items-center">
-                        <span className="text-xs text-gray-400 w-44
-                                         flex-shrink-0">
-                          Report Status
-                        </span>
-                        <StatusBadge value={g.report_status} />
-                      </div>
-                      <LinkRow label="Utilization Report"
-                        value={g.link_to_utilization_report} />
-                    </Section>
-                  </>
-                )
-              })()}
-            </div>
-
-            <div className="sticky bottom-0 bg-white border-t border-gray-100
-                            px-6 py-4 flex gap-3 rounded-b-2xl">
-              <button
-                onClick={() => {
-                  setSelectedGrant(detailGrant)
-                  setDetailGrant(null)
-                }}
-                className="flex-1 bg-blue-700 text-white py-2 rounded-lg
-                           text-sm font-medium hover:bg-blue-800 transition"
-              >
-                Generate Report
-              </button>
-              <button
-                onClick={() => setDetailGrant(null)}
-                className="px-6 py-2 rounded-lg border border-gray-200
-                           text-sm text-gray-500 hover:bg-gray-50 transition"
-              >
-                Close
-              </button>
             </div>
           </div>
-        </div>
-      )}
+        )
+      })()}
 
-      {/* ── Report Modal ──────────────────────────────────────────── */}
+      {/* ── Report modal ──────────────────────────────────────────── */}
       {selectedGrant && (
-        <div className="fixed inset-0 bg-black bg-opacity-40 flex
-                        items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg
-                          max-h-screen overflow-y-auto">
-            <div className="px-6 py-4 border-b border-gray-100">
-              <h2 className="text-lg font-bold text-gray-800">
-                Generate Report
-              </h2>
-              <p className="text-sm text-gray-500 mt-0.5">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm"
+             onClick={() => !reportLoading && setSelectedGrant(null)}>
+          <div className="flex max-h-[92vh] w-full max-w-lg flex-col rounded-2xl bg-white shadow-2xl"
+               role="dialog" aria-modal="true" aria-label="Generate report"
+               onClick={e => e.stopPropagation()}>
+            <div className="border-b border-slate-200 px-6 py-4">
+              <h2 className="text-lg font-semibold text-slate-900">Generate report</h2>
+              <p className="mt-0.5 truncate text-sm text-slate-500">
                 {selectedGrant.grant_number} — {selectedGrant.supplier}
               </p>
             </div>
-            <div className="px-6 py-4">
-              <p className="text-xs font-semibold text-gray-500 uppercase
-                            tracking-wider mb-3">
-                Select sections to include
-              </p>
-              <div className="space-y-2">
-                {[
-                  { key: 'overview', label: 'Grant Overview' },
-                  { key: 'financial', label: 'Financial Summary' },
-                  { key: 'dates', label: 'Key Dates' },
-                  { key: 'shipping', label: 'Shipping & Documents' },
-                  { key: 'grn', label: 'GRN / Receiving' },
-                  { key: 'location', label: 'Installation & Location' },
-                  { key: 'item', label: 'Item Details' },
-                  { key: 'pictures', label: 'Pictures' },
-                  { key: 'report', label: 'Report Status' },
-                ].map(section => (
-                  <label
-                    key={section.key}
-                    className="flex items-center gap-3 p-3 rounded-lg
-                               hover:bg-gray-50 cursor-pointer transition"
-                  >
+
+            <div className="overflow-y-auto px-6 py-5">
+              <p className="mb-3 text-sm font-medium text-slate-700">Sections to include</p>
+              <div className="grid gap-1 sm:grid-cols-2">
+                {SECTION_LABELS.map(section => (
+                  <label key={section.key}
+                         className="flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 transition hover:bg-slate-50">
                     <input
                       type="checkbox"
                       checked={selectedSections[section.key]}
-                      onChange={e => setSelectedSections(prev => ({
-                        ...prev,
-                        [section.key]: e.target.checked
-                      }))}
-                      className="w-4 h-4 rounded accent-blue-700"
+                      onChange={e => setSelectedSections(prev => ({ ...prev, [section.key]: e.target.checked }))}
+                      className="h-4 w-4 rounded accent-brand-700"
                     />
-                    <span className="text-sm text-gray-700 font-medium">
-                      {section.label}
-                    </span>
+                    <span className="text-sm text-slate-700">{section.label}</span>
                   </label>
                 ))}
               </div>
-              <div className="flex gap-3 mt-3 pt-3 border-t border-gray-100">
-                <button
-                  onClick={() => setSelectedSections({
-                    overview: true, financial: true, dates: true,
-                    shipping: true, grn: true, location: true,
-                    item: true, pictures: true, report: true,
-                  })}
-                  className="text-xs text-blue-600 hover:text-blue-800"
-                >
-                  Select all
-                </button>
-                <span className="text-gray-300">|</span>
-                <button
-                  onClick={() => setSelectedSections({
-                    overview: false, financial: false, dates: false,
-                    shipping: false, grn: false, location: false,
-                    item: false, pictures: false, report: false,
-                  })}
-                  className="text-xs text-gray-400 hover:text-gray-600"
-                >
-                  Clear all
-                </button>
+              <div className="mt-3 flex gap-3 border-t border-slate-100 pt-3 text-sm">
+                <button onClick={() => setSelectedSections(ALL_SECTIONS_ON)}
+                        className="font-medium text-brand-700 hover:text-brand-900">Select all</button>
+                <span className="text-slate-300">|</span>
+                <button onClick={() => setSelectedSections(ALL_SECTIONS_OFF)}
+                        className="text-slate-500 hover:text-slate-700">Clear all</button>
               </div>
+              <p className="mt-4 text-xs text-slate-400">
+                Chapters with their own report template ignore this selection and use the fixed form.
+              </p>
             </div>
-            <div className="px-6 py-4 border-t border-gray-100 flex gap-3">
+
+            <div className="flex gap-3 border-t border-slate-200 px-6 py-4">
               <button
-                onClick={() => downloadReport(
-                  selectedGrant.grant_number, 'pdf'
-                )}
-                disabled={reportLoading ||
-                  !Object.values(selectedSections).some(Boolean)}
-                className="flex-1 bg-red-500 text-white py-2.5 rounded-lg
-                           text-sm font-medium hover:bg-red-600 transition
-                           disabled:opacity-50"
+                onClick={() => downloadReport(selectedGrant.grant_number, 'pdf')}
+                disabled={reportLoading || !Object.values(selectedSections).some(Boolean)}
+                className="flex-1 rounded-lg bg-rose-600 py-2.5 text-sm font-semibold text-white transition hover:bg-rose-700 disabled:opacity-50"
               >
-                {reportLoading ? 'Generating...' : '↓ Download PDF'}
+                {reportLoading ? 'Generating…' : 'Download PDF'}
               </button>
               <button
-                onClick={() => downloadReport(
-                  selectedGrant.grant_number, 'word'
-                )}
-                disabled={reportLoading ||
-                  !Object.values(selectedSections).some(Boolean)}
-                className="flex-1 bg-blue-700 text-white py-2.5 rounded-lg
-                           text-sm font-medium hover:bg-blue-800 transition
-                           disabled:opacity-50"
+                onClick={() => downloadReport(selectedGrant.grant_number, 'word')}
+                disabled={reportLoading || !Object.values(selectedSections).some(Boolean)}
+                className="flex-1 rounded-lg bg-brand-700 py-2.5 text-sm font-semibold text-white transition hover:bg-brand-800 disabled:opacity-50"
               >
-                {reportLoading ? 'Generating...' : '↓ Download Word'}
+                {reportLoading ? 'Generating…' : 'Download Word'}
               </button>
-            </div>
-            <div className="px-6 pb-4">
               <button
-                onClick={() => setSelectedGrant(null)}
-                className="w-full text-sm text-gray-400 hover:text-gray-600
-                           py-2"
+                onClick={() => setSelectedGrant(null)} disabled={reportLoading}
+                className="rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-600 transition hover:bg-slate-50 disabled:opacity-50"
               >
                 Cancel
               </button>
@@ -1771,7 +1126,6 @@ function Dashboard({ session }) {
           </div>
         </div>
       )}
-
     </div>
   )
 }

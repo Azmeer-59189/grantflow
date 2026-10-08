@@ -1,1 +1,31 @@
 @import "tailwindcss";
+
+/* ── GrantFlow theme ───────────────────────────────────────────────
+   Change the look of the whole app by editing these values.
+   Use them as bg-brand-700, text-brand-800, border-brand-200, bg-canvas ... */
+@theme {
+  --font-sans: "Figtree", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+
+  --color-brand-50:  #eef6f8;
+  --color-brand-100: #d6eaef;
+  --color-brand-200: #b0d6df;
+  --color-brand-300: #82bccb;
+  --color-brand-400: #4f9db3;
+  --color-brand-500: #2f8099;
+  --color-brand-600: #266a80;
+  --color-brand-700: #1f5668;
+  --color-brand-800: #1b4656;
+  --color-brand-900: #163a47;
+  --color-brand-950: #0d2530;
+
+  --color-canvas: #f3f7f9;
+  --color-ink: #14303b;
+}
+
+@layer base {
+  html { -webkit-font-smoothing: antialiased; }
+  body { background: var(--color-canvas); color: var(--color-ink); font-family: var(--font-sans); }
+  :focus-visible { outline: 2px solid var(--color-brand-500); outline-offset: 2px; }
+  button { cursor: pointer; }
+  button:disabled { cursor: not-allowed; }
+}
