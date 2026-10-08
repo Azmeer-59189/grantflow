@@ -192,18 +192,19 @@ class GrantSummary:
 
 def validate_grant_dict(grant: dict, is_new: bool = True) -> None:
     """Validate a grant dictionary before writing to sheet."""
-    # Check required fields
+    # Required fields
     for field in ["country", "grant_number", "supplier", "item"]:
         if not str(grant.get(field, "")).strip():
             label = field.replace("_", " ").title()
             raise GrantDataValidationError(f"{label} is required.")
 
-    # Validate year (optional, but must be a 4-digit year if given)
+    # Year (optional, but must be a 4-digit year if given)
     year = str(grant.get("year", "")).strip()
     if year and not re.fullmatch(r"20\d{2}", year):
         raise GrantDataValidationError("Year must be a 4-digit year, e.g. 2025.")
 
-        chapter = str(grant.get("chapter", "")).strip()
+    # Chapter and Project Type decide which report template is used
+    chapter = str(grant.get("chapter", "")).strip()
     project_type = str(grant.get("project_type", "")).strip()
 
     if chapter not in VALID_CHAPTERS:
@@ -220,7 +221,7 @@ def validate_grant_dict(grant: dict, is_new: bool = True) -> None:
             f"{chapter} grants can only be: {', '.join(sorted(allowed))}."
         )
 
-    # Validate dropdowns
+    # Dropdown values
     if grant.get("country") not in VALID_COUNTRIES:
         raise GrantDataValidationError(
             f"Country must be one of: {', '.join(sorted(VALID_COUNTRIES))}"
@@ -229,7 +230,6 @@ def validate_grant_dict(grant: dict, is_new: bool = True) -> None:
         raise GrantDataValidationError(
             f"Payment Status must be one of: {', '.join(VALID_PAYMENT_STATUS)}"
         )
-
 
 def process_grant_rows(rows: list[dict[str, str]]) -> GrantSummary:
     """Process all grant rows from the sheet into a GrantSummary."""
