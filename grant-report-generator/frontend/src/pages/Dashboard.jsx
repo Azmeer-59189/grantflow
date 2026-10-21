@@ -2,6 +2,9 @@ import { useAccess } from '../context/Access'
 import useSavedViews from '../hooks/useSavedViews'
 import { sortRecords, paginateRecords, SORT_FIELDS } from '../lib/records'
 import DeferredAnalytics from '../components/DeferredAnalytics'
+import GrantTimeline from '../components/GrantTimeline'
+import { formatDate } from '../lib/dates'
+import { grantStage, STAGE_OPTIONS } from '../lib/pipeline'
 import { apiFetch } from '../lib/api'
 import { useState, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
@@ -32,24 +35,6 @@ const SECTION_LABELS = [
 const num = v => parseFloat(v) || 0
 const usd = v => (v ? `$${Number(v).toLocaleString()}` : '—')
 const usd0 = v => `$${v.toLocaleString(undefined, { maximumFractionDigits: 0 })}`
-
-// Dates can arrive as ISO text or as Google Sheets serial numbers
-function formatDate(v) {
-  if (!v) return ''
-  const s = String(v).trim()
-  const n = Number(s)
-  let d
-  if (!Number.isNaN(n) && n > 20000 && n < 80000) {
-    d = new Date(Date.UTC(1899, 11, 30 + Math.floor(n)))
-  } else if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
-    d = new Date(s.slice(0, 10) + 'T00:00:00Z')
-  } else {
-    return s
-  }
-  return d.toLocaleDateString('en-GB', {
-    day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC',
-  })
-}
 
 function statusTone(value) {
   const green = ['Complete', 'Report Complete', 'Received', 'Paid']
@@ -197,6 +182,7 @@ function Dashboard({ session }) {
   const [filterPayment, setFilterPayment] = useState('')
   const [filterReport, setFilterReport] = useState('')
   const [filterSearch, setFilterSearch] = useState('')
+  const [filterStage, setFilterStage] = useState('')
 
   useEffect(() => { fetchGrants() }, [])
 
@@ -272,11 +258,12 @@ function Dashboard({ session }) {
     .filter(g => !filterDept || g.department === filterDept)
     .filter(g => !filterPayment || g.payment_status === filterPayment)
     .filter(g => !filterReport || g.report_status === filterReport)
+    .filter(g => !filterStage || grantStage(g).key === filterStage)
     .filter(g => !q ||
       g.grant_number?.toLowerCase().includes(q) ||
       g.supplier?.toLowerCase().includes(q) ||
       g.item?.toLowerCase().includes(q))
-  const filterKey = JSON.stringify([filterCountry, filterChapter, filterDept, filterPayment, filterReport, filterSearch, sortField, sortDirection, pageSize])
+  const filterKey = JSON.stringify([filterCountry, filterChapter, filterDept, filterPayment, filterReport, filterSearch, filterStage, sortField, sortDirection, pageSize])
   const sortedRows = sortRecords(recordRows, sortField, sortDirection)
   const pagination = paginateRecords(sortedRows, paging.key === filterKey ? paging.page : 1, pageSize)
   function applyView(name) {
@@ -285,21 +272,29 @@ function Dashboard({ session }) {
     if (!view) return
     const f = view.filters
     setFilterCountry(f.country || ''); setFilterChapter(f.chapter || ''); setFilterDept(f.department || '')
-    setFilterPayment(f.payment || ''); setFilterReport(f.report || ''); setFilterSearch(f.search || '')
+    setFilterPayment(f.payment || ''); setFilterReport(f.report || ''); setFilterSearch(f.search || ''); setFilterStage(f.stage || '')
     setSortField(SORT_FIELDS.includes(f.sortField) ? f.sortField : 'grant_number')
     setSortDirection(f.sortDirection === 'desc' ? 'desc' : 'asc')
   }
   function saveView() {
-    if (saved.save(viewName, { country: filterCountry, chapter: filterChapter, department: filterDept, payment: filterPayment, report: filterReport, search: filterSearch, sortField, sortDirection })) {
+    if (saved.save(viewName, { country: filterCountry, chapter: filterChapter, department: filterDept, payment: filterPayment, report: filterReport, search: filterSearch, stage: filterStage, sortField, sortDirection })) {
       setSelectedView(viewName.trim().slice(0, 60)); setViewName('')
     }
   }
+  // Pipeline bars open the records filtered to that stage (and chapter, if one is selected).
+  function showStage(stage) {
+    clearFilters()
+    setFilterChapter(activeChapter)
+    setFilterStage(stage)
+    setActiveNav('records')
+  }
+
   const anyFilter = filterCountry || filterChapter || filterDept ||
-    filterPayment || filterReport || filterSearch
+    filterPayment || filterReport || filterSearch || filterStage
 
   function clearFilters() {
     setFilterCountry(''); setFilterChapter(''); setFilterDept('')
-    setFilterPayment(''); setFilterReport(''); setFilterSearch(''); setSelectedView('')
+    setFilterPayment(''); setFilterReport(''); setFilterSearch(''); setFilterStage(''); setSelectedView('')
   }
 
   const NAV = [
@@ -366,6 +361,16 @@ function Dashboard({ session }) {
         <div className="mx-auto max-w-[1400px] p-4 md:p-8 lg:px-10">
           {['admin', 'owner'].includes(role) && <button onClick={() => navigate('/access')} className="mb-3 mr-4 text-xs font-medium text-brand-600 md:hidden">Team access</button>}
           {location.state?.notice && <p role="status" className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">{location.state.notice}</p>}
+          {data?.row_errors?.length > 0 && (
+            <details className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+              <summary className="cursor-pointer font-medium">
+                {data.row_errors.length} {data.row_errors.length === 1 ? 'problem' : 'problems'} in the Google Sheet. Affected values are shown as blank until fixed there.
+              </summary>
+              <ul className="mt-3 list-disc space-y-1 pl-5 text-xs">
+                {data.row_errors.map(message => <li key={message}>{message}</li>)}
+              </ul>
+            </details>
+          )}
           {!canEdit && <p className="mb-4 rounded-xl border border-brand-100 bg-brand-50 p-4 text-sm text-brand-700">View-only access: you can review grants, activity, and reports. An administrator can grant editing access.</p>}
           <button onClick={() => navigate('/audit')} className="mb-3 text-xs font-medium text-brand-600 md:hidden">Grant activity</button>
           <div className="mb-8 flex flex-wrap items-center justify-between gap-3 border-b border-slate-200/80 pb-5">
@@ -477,7 +482,7 @@ function Dashboard({ session }) {
                     </section>
                   )}
 
-                  <DeferredAnalytics filteredGrants={filteredGrants} activeChapter={activeChapter} />
+                  <DeferredAnalytics filteredGrants={filteredGrants} onStageSelect={showStage} />
                 </>
               )}
             </>
@@ -511,6 +516,14 @@ function Dashboard({ session }) {
                                 options={['Pending', 'Partial', 'Complete']} />
                   <FilterSelect value={filterReport} onChange={setFilterReport} placeholder="All report statuses"
                                 options={['Complete', 'Pending', 'Incomplete Information']} />
+                  <select
+                    aria-label="Filter by stage" value={filterStage} onChange={e => setFilterStage(e.target.value)}
+                    className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700
+                               focus:border-brand-500 focus:outline-none focus:ring-4 focus:ring-brand-100"
+                  >
+                    <option value="">All stages</option>
+                    {STAGE_OPTIONS.map(stage => <option key={stage.key} value={stage.key}>{stage.label}</option>)}
+                  </select>
                   <input
                     type="search" value={filterSearch} onChange={e => setFilterSearch(e.target.value)}
                     placeholder="Search grant number, supplier or item"
@@ -566,7 +579,7 @@ function Dashboard({ session }) {
                     </div>
                   ) : (
                     <div className="max-h-[68vh] overflow-auto">
-                      <table data-workspace-table="true" className="w-full text-sm" style={{ minWidth: '1600px' }}>
+                      <table data-workspace-table="true" className="w-full text-sm" style={{ minWidth: '1760px' }}>
                         <thead>
                           <tr className="border-b border-slate-200 text-left">
                             <th className={th}>Grant number</th>
@@ -582,6 +595,7 @@ function Dashboard({ session }) {
                             <th className={th}>Payment</th>
                             <th className={th}>Report</th>
                             <th className={th}>Shipping</th>
+                            <th className={th}>Next step</th>
                             <th className={th}>Location</th>
                             <th className={`${th} text-right`}>Actions</th>
                           </tr>
@@ -589,7 +603,7 @@ function Dashboard({ session }) {
                         <tbody className="divide-y divide-slate-100">
                           {recordRows.length === 0 && (
                             <tr>
-                              <td colSpan={15} className="px-6 py-12 text-center text-slate-500">
+                              <td colSpan={16} className="px-6 py-12 text-center text-slate-500">
                                 No grants match these filters.{' '}
                                 <button onClick={clearFilters} className="font-medium text-brand-700 underline">Clear filters</button>
                               </td>
@@ -614,6 +628,7 @@ function Dashboard({ session }) {
                               <td className="whitespace-nowrap px-4 py-3"><StatusPill value={grant.payment_status} /></td>
                               <td className="whitespace-nowrap px-4 py-3"><StatusPill value={grant.report_status} /></td>
                               <td className="whitespace-nowrap px-4 py-3"><StatusPill value={grant.shipping_documents_status} /></td>
+                              <td className="whitespace-nowrap px-4 py-3 text-slate-600">{grantStage(grant).label}</td>
                               <td className="whitespace-nowrap px-4 py-3 text-slate-500">{grant.location || '—'}</td>
                               <td className="whitespace-nowrap px-4 py-3 text-right" onClick={e => e.stopPropagation()}>
                                 <div className="flex justify-end gap-2">
@@ -687,6 +702,8 @@ function Dashboard({ session }) {
               </div>
 
               <div className="space-y-8 overflow-y-auto px-6 py-6">
+                <GrantTimeline grant={g} />
+
                 <DetailSection title="Grant overview">
                   <DetailField label="Year" value={g.year} />
                   <DetailField label="Country" value={g.country} />

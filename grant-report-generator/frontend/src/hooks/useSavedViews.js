@@ -1,5 +1,5 @@
 import { useState } from 'react'
-const FIELDS = ['country', 'chapter', 'department', 'payment', 'report', 'search', 'sortField', 'sortDirection']
+const FIELDS = ['country', 'chapter', 'department', 'payment', 'report', 'stage', 'search', 'sortField', 'sortDirection']
 export default function useSavedViews(userId) {
   const key = `grantflow:views:v1:${userId}`
   const [views, setViews] = useState(() => {

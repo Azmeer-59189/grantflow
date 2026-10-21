@@ -1,33 +1,23 @@
-import { useState } from 'react'
 import {
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer,
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, LabelList,
-  ComposedChart, Area
+  BarChart, Bar, XAxis, YAxis, CartesianGrid,
 } from 'recharts'
-import {
-  ComposableMap, Geographies, Geography, ZoomableGroup
-} from 'react-simple-maps'
+import { formatMonth } from '../lib/dates'
+import { fundingByChapter, paymentsByMonth, pipelineCounts, valueByCountry } from '../lib/pipeline'
 
-const GEO_URL = 'https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json'
-
-// Map geometry names -> our country names
-const GEO_NAME_MAP = {
-  'United States of America': 'United States',
-  'United Kingdom': 'United Kingdom',
-  'Germany': 'Germany',
-  'Switzerland': 'Switzerland',
-  'United Arab Emirates': 'UAE',
-  'Canada': 'Canada',
-}
+// Validated with the dataviz palette checks (light surface). The lighter step
+// is below 3:1 contrast, so every chart that uses it also labels its values.
+const SERIES = '#595bd0'      // brand-600, single-series marks
+const PAID = '#4b49b5'        // brand-700
+const REMAINING = '#8991f4'   // brand-400
+const GRID = '#eef0f4'
 
 const STATUS_COLORS = {
   'Complete': '#059669',
   'Pending': '#d97706',
   'Incomplete Information': '#e11d48',
 }
-const PROJECT_COLORS = { 'Expansion': '#6563cf', 'Non-Expansion': '#c4c7ed' }
-const BRAND_LINE = '#6563cf'
-const AMBER_LINE = '#d97706'
+const PROJECT_COLORS = { 'Expansion': PAID, 'Non-Expansion': REMAINING }
 
 const TOOLTIP_STYLE = {
   borderRadius: '8px', border: '1px solid #e2e8f0',
@@ -35,30 +25,15 @@ const TOOLTIP_STYLE = {
 }
 
 // ── Small helpers ───────────────────────────────────────────────────────────
-const num = value => Number(value) || 0
-const usd0 = value => `$${value.toLocaleString(undefined, { maximumFractionDigits: 0 })}`
-function formatDate(v) {
-  if (!v) return ''
-  const s = String(v).trim()
-  const n = Number(s)
-  let d
-  if (!Number.isNaN(n) && n > 20000 && n < 80000) {
-    d = new Date(Date.UTC(1899, 11, 30 + Math.floor(n)))
-  } else if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
-    d = new Date(s.slice(0, 10) + 'T00:00:00Z')
-  } else {
-    return s
-  }
-  return d.toLocaleDateString('en-GB', {
-    day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC',
-  })
-}
+const compactUsd = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', notation: 'compact', maximumFractionDigits: 1 })
+const fullUsd = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })
+const pct = (part, whole) => (whole ? Math.round((part / whole) * 100) : 0)
 
 function Card({ title, subtitle, action, children, className = '' }) {
   return (
     <section className={`workspace-card rounded-2xl border border-slate-200/80 bg-white ${className}`}>
       {(title || action) && (
-        <header className="flex items-start justify-between gap-4 px-5 pt-5">
+        <header className="flex flex-wrap items-start justify-between gap-4 px-5 pt-5">
           <div>
             <h3 className="text-[15px] font-semibold text-slate-900">{title}</h3>
             {subtitle && <p className="mt-0.5 text-sm text-slate-500">{subtitle}</p>}
@@ -79,6 +54,172 @@ function Empty({ children, height = 'h-40' }) {
   )
 }
 
+function Swatch({ color }) {
+  return <span aria-hidden="true" className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ background: color }} />
+}
+
+// Every chart keeps its numbers available as a table.
+function TableView({ columns, rows }) {
+  return (
+    <details className="mt-4 text-xs">
+      <summary className="cursor-pointer font-medium text-slate-500 hover:text-brand-700">View as table</summary>
+      <div className="mt-2 overflow-x-auto">
+        <table className="w-full text-left">
+          <thead className="text-slate-500"><tr>{columns.map(c => <th key={c.label} className={`p-2 font-medium ${c.numeric ? 'text-right' : ''}`}>{c.label}</th>)}</tr></thead>
+          <tbody>{rows.map((row, index) => (
+            <tr key={index} className="border-t border-slate-100">
+              {columns.map(c => <td key={c.label} className={`p-2 text-slate-700 ${c.numeric ? 'text-right tabular-nums' : ''}`}>{c.value(row)}</td>)}
+            </tr>
+          ))}</tbody>
+        </table>
+      </div>
+    </details>
+  )
+}
+
+// A horizontal bar: square at the baseline, 4px rounded data end, <= 24px thick.
+function HBar({ width, color }) {
+  return <span className="block h-5 rounded-r-[4px]" style={{ width: `${width}%`, background: color, minWidth: width > 0 ? 3 : 0 }} />
+}
+
+// ── Pipeline ────────────────────────────────────────────────────────────────
+function PipelineCard({ grants, onStageSelect }) {
+  const stages = pipelineCounts(grants)
+  const max = Math.max(...stages.map(s => s.count), 1)
+  return (
+    <Card className="mb-6" title="Where grants are now"
+          subtitle="Each grant is counted once, at its next milestone. Select a stage to see those grants.">
+      {grants.length === 0 ? <Empty>No grants yet</Empty> : <>
+        <ol className="space-y-1">
+          {stages.map(stage => (
+            <li key={stage.key}>
+              <button type="button" onClick={() => onStageSelect?.(stage.key)} disabled={!stage.count}
+                      className="group grid w-full grid-cols-[minmax(8rem,13rem)_1fr_5.5rem] items-center gap-3 rounded-lg px-2 py-1.5 text-left transition hover:bg-brand-50/60 disabled:opacity-100 disabled:hover:bg-transparent">
+                <span className={`truncate text-sm ${stage.key === 'done' ? 'font-medium text-slate-800' : 'text-slate-600'}`}>{stage.label}</span>
+                <span className="relative"><HBar width={(stage.count / max) * 100} color={SERIES} /></span>
+                <span className="text-right text-sm tabular-nums">
+                  <span className="font-semibold text-slate-900">{stage.count}</span>
+                  <span className="ml-1.5 text-xs text-slate-400">{pct(stage.count, grants.length)}%</span>
+                </span>
+              </button>
+            </li>
+          ))}
+        </ol>
+        <TableView rows={stages} columns={[
+          { label: 'Stage', value: s => s.label },
+          { label: 'Grants', value: s => s.count, numeric: true },
+          { label: 'Share', value: s => `${pct(s.count, grants.length)}%`, numeric: true },
+        ]} />
+      </>}
+    </Card>
+  )
+}
+
+// ── Paid vs. still to pay ───────────────────────────────────────────────────
+function FundingCard({ grants }) {
+  const rows = fundingByChapter(grants)
+  const max = Math.max(...rows.map(r => r.total), 1)
+  const legend = (
+    <div className="flex gap-4 text-xs text-slate-500">
+      <span className="flex items-center gap-1.5"><Swatch color={PAID} />Paid</span>
+      <span className="flex items-center gap-1.5"><Swatch color={REMAINING} />Still to pay</span>
+    </div>
+  )
+  return (
+    <Card title="Paid vs. still to pay" subtitle="USD by chapter" action={rows.length > 0 && legend}>
+      {rows.length === 0 ? <Empty>No grant amounts yet</Empty> : <>
+        <ul className="space-y-4">
+          {rows.map(row => (
+            <li key={row.chapter} className="group relative" tabIndex={0}>
+              <div className="mb-1.5 flex items-baseline justify-between gap-3 text-sm">
+                <span className="font-medium text-slate-700">{row.chapter}</span>
+                <span className="tabular-nums text-slate-500">
+                  <span className="font-semibold text-slate-900">{pct(row.paid, row.total)}% paid</span>
+                  <span className="ml-2 text-xs">{compactUsd.format(row.paid)} of {compactUsd.format(row.total)}</span>
+                </span>
+              </div>
+              {/* 2px surface gap between the segments */}
+              <div className="flex gap-[2px]" style={{ width: `${(row.total / max) * 100}%` }}>
+                {row.paid > 0 && <span className={`block h-5 ${row.remaining > 0 ? '' : 'rounded-r-[4px]'}`} style={{ flexGrow: row.paid, background: PAID }} />}
+                {row.remaining > 0 && <span className="block h-5 rounded-r-[4px]" style={{ flexGrow: row.remaining, background: REMAINING }} />}
+              </div>
+              <div role="tooltip" className="pointer-events-none absolute right-0 top-full z-10 mt-1 hidden min-w-48 rounded-lg border border-slate-200 bg-white p-3 text-xs shadow-lg group-hover:block group-focus:block">
+                <p className="mb-1 font-semibold text-slate-900">{row.chapter}</p>
+                <p className="flex items-center justify-between gap-4 text-slate-600"><span className="flex items-center gap-1.5"><Swatch color={PAID} />Paid</span><span className="tabular-nums">{fullUsd.format(row.paid)}</span></p>
+                <p className="flex items-center justify-between gap-4 text-slate-600"><span className="flex items-center gap-1.5"><Swatch color={REMAINING} />Still to pay</span><span className="tabular-nums">{fullUsd.format(row.remaining)}</span></p>
+              </div>
+            </li>
+          ))}
+        </ul>
+        <TableView rows={rows} columns={[
+          { label: 'Chapter', value: r => r.chapter },
+          { label: 'Paid (USD)', value: r => fullUsd.format(r.paid), numeric: true },
+          { label: 'Still to pay (USD)', value: r => fullUsd.format(r.remaining), numeric: true },
+          { label: 'Total (USD)', value: r => fullUsd.format(r.total), numeric: true },
+        ]} />
+      </>}
+    </Card>
+  )
+}
+
+// ── Grant value by country ──────────────────────────────────────────────────
+function CountryCard({ grants }) {
+  const rows = valueByCountry(grants)
+  const max = Math.max(...rows.map(r => r.value), 1)
+  return (
+    <Card title="Grant value by country" subtitle="Total USD, largest first">
+      {rows.length === 0 ? <Empty>No data yet</Empty> : <>
+        <ul className="space-y-2">
+          {rows.map(row => (
+            <li key={row.country} className="grid grid-cols-[minmax(6rem,9rem)_1fr_auto] items-center gap-3 text-sm"
+                title={`${row.country}: ${fullUsd.format(row.value)} across ${row.count} grant${row.count === 1 ? '' : 's'}`}>
+              <span className="truncate text-slate-600">{row.country}</span>
+              <HBar width={(row.value / max) * 100} color={SERIES} />
+              <span className="text-right tabular-nums">
+                <span className="font-semibold text-slate-900">{compactUsd.format(row.value)}</span>
+                <span className="ml-1.5 text-xs text-slate-400">{row.count}</span>
+              </span>
+            </li>
+          ))}
+        </ul>
+        <TableView rows={rows} columns={[
+          { label: 'Country', value: r => r.country },
+          { label: 'Grants', value: r => r.count, numeric: true },
+          { label: 'Value (USD)', value: r => fullUsd.format(r.value), numeric: true },
+        ]} />
+      </>}
+    </Card>
+  )
+}
+
+// ── Payments per month ──────────────────────────────────────────────────────
+function PaymentsCard({ grants }) {
+  const months = paymentsByMonth(grants)
+  return (
+    <Card className="mb-6" title="Payments per month" subtitle="Current payment (USD) by payment date, last 18 months with payments">
+      {months.length === 0 ? <Empty height="h-48">No payments with a payment date yet.</Empty> : <>
+        <ResponsiveContainer width="100%" height={240}>
+          <BarChart data={months} margin={{ top: 10, right: 8, left: 0, bottom: 0 }}>
+            <CartesianGrid stroke={GRID} vertical={false} />
+            <XAxis dataKey="month" tickFormatter={formatMonth} tick={{ fontSize: 11, fill: '#64748b' }}
+                   axisLine={{ stroke: '#e2e8f0' }} tickLine={false} interval="preserveStartEnd" />
+            <YAxis tickFormatter={v => compactUsd.format(v)} tick={{ fontSize: 11, fill: '#94a3b8' }}
+                   axisLine={false} tickLine={false} width={56} />
+            <Tooltip contentStyle={TOOLTIP_STYLE} cursor={{ fill: 'rgba(89,91,208,0.06)' }}
+                     labelFormatter={formatMonth} formatter={value => [fullUsd.format(value), 'Payments']} />
+            <Bar dataKey="payment" fill={SERIES} radius={[4, 4, 0, 0]} maxBarSize={24} isAnimationActive={false} />
+          </BarChart>
+        </ResponsiveContainer>
+        <TableView rows={months} columns={[
+          { label: 'Month', value: m => formatMonth(m.month) },
+          { label: 'Payments (USD)', value: m => fullUsd.format(m.payment), numeric: true },
+        ]} />
+      </>}
+    </Card>
+  )
+}
+
+// ── Donuts ──────────────────────────────────────────────────────────────────
 function DonutCard({ title, subtitle, data, colorFor }) {
   const total = data.reduce((s, d) => s + d.value, 0)
   return (
@@ -89,7 +230,7 @@ function DonutCard({ title, subtitle, data, colorFor }) {
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie data={data} dataKey="value" innerRadius={54} outerRadius={80}
-                     paddingAngle={2} strokeWidth={0}>
+                     paddingAngle={2} strokeWidth={0} isAnimationActive={false}>
                   {data.map(d => <Cell key={d.name} fill={colorFor(d.name)} />)}
                 </Pie>
                 <Tooltip contentStyle={TOOLTIP_STYLE} />
@@ -117,251 +258,34 @@ function DonutCard({ title, subtitle, data, colorFor }) {
   )
 }
 
-// ── Map helpers ─────────────────────────────────────────────────────────────
-function computeCountryStats(grants) {
-  const values = {}, counts = {}, chapters = {}
-  grants.forEach(g => {
-    const country = g.country || 'Unknown'
-    values[country] = (values[country] || 0) + num(g.total_grant_amount_usd)
-    counts[country] = (counts[country] || 0) + 1
-    if (!chapters[country]) chapters[country] = new Set()
-    if (g.chapter) chapters[country].add(g.chapter)
-  })
-  return { values, counts, chapters, max: Math.max(...Object.values(values), 1) }
-}
-
-function mapFill(geoName, stats, activeChapter) {
-  const ourName = GEO_NAME_MAP[geoName]
-  if (!ourName) return '#ebedf3'
-  if (activeChapter) {
-    const ch = stats.chapters[ourName]
-    if (!ch || !ch.has(activeChapter)) return '#ebedf3'
-  }
-  const value = stats.values[ourName] || 0
-  if (value === 0) return '#dbddf0'
-  const intensity = value / stats.max
-  if (intensity > 0.7) return '#403e94'
-  if (intensity > 0.4) return '#6563cf'
-  if (intensity > 0.1) return '#9094e2'
-  return '#c4c7ed'
-}
-
-// ── Detail modal pieces ─────────────────────────────────────────────────────
-
-export default function DashboardAnalytics({ filteredGrants, activeChapter }) {
-  const totalCount = filteredGrants.length
-  const [mapZoom, setMapZoom] = useState({ coordinates: [10, 30], zoom: 1 })
-  const [mapTooltip, setMapTooltip] = useState(null)
+export default function DashboardAnalytics({ filteredGrants, onStageSelect }) {
   function countBy(getKey, order) {
     const counts = {}
     filteredGrants.forEach(g => {
       const k = getKey(g)
       if (k !== undefined && k !== null) counts[k] = (counts[k] || 0) + 1
     })
-    const names = order || Object.keys(counts)
-    return names
-      .map(name => ({ name, value: counts[name] || 0 }))
-      .filter(d => d.value > 0)
+    return order.map(name => ({ name, value: counts[name] || 0 })).filter(d => d.value > 0)
   }
-
   const projectTypeData = countBy(g => g.project_type, ['Expansion', 'Non-Expansion'])
   const reportStatusData = countBy(g => g.report_status, ['Complete', 'Pending', 'Incomplete Information'])
-  const countryData = countBy(g => g.country || 'Unknown').sort((a, b) => b.value - a.value)
-
-  function getActivityData() {
-    const dated = filteredGrants
-      .filter(g => g.grant_receiving_date)
-      .map(g => ({ date: g.grant_receiving_date, payment: num(g.current_payment_usd) }))
-      .sort((a, b) => new Date(a.date) - new Date(b.date))
-    if (dated.length === 0) return []
-    const grouped = {}
-    dated.forEach(({ date, payment }) => {
-      if (!grouped[date]) grouped[date] = { date, count: 0, payment: 0 }
-      grouped[date].count += 1
-      grouped[date].payment += payment
-    })
-    let cumCount = 0, cumPayment = 0
-    return Object.values(grouped)
-      .sort((a, b) => new Date(a.date) - new Date(b.date))
-      .map(d => {
-        cumCount += d.count
-        cumPayment += d.payment
-        return { date: d.date, grants: cumCount, payment: Math.round(cumPayment) }
-      })
-  }
-  const activityData = getActivityData()
-  const mapStats = computeCountryStats(filteredGrants)
 
   return <>
-                  {/* Donuts */}
-                  <div className="mb-6 grid gap-6 lg:grid-cols-2">
-                    <DonutCard
-                      title="Project type" subtitle="Expansion and non-expansion grants"
-                      data={projectTypeData} colorFor={n => PROJECT_COLORS[n] || '#94a3b8'}
-                    />
-                    <DonutCard
-                      title="Report status" subtitle={`${totalCount} grants in total`}
-                      data={reportStatusData} colorFor={n => STATUS_COLORS[n] || '#94a3b8'}
-                    />
-                  </div>
-
-                  {/* Map */}
-                  <Card
-                    className="mb-6"
-                    title="Where grants are deployed"
-                    subtitle="Darker countries hold more grant value. Scroll to zoom, drag to move."
-                    action={
-                      <button
-                        onClick={() => setMapZoom({ coordinates: [0, 20], zoom: 1 })}
-                        className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:bg-slate-50"
-                      >
-                        Reset view
-                      </button>
-                    }
-                  >
-                    <div className="relative overflow-hidden rounded-lg bg-brand-50/60" style={{ height: '400px' }}>
-                      <ComposableMap
-                        projection="geoMercator"
-                        projectionConfig={{ scale: 130, center: [10, 30] }}
-                        style={{ width: '100%', height: '100%' }}
-                      >
-                        <ZoomableGroup
-                          zoom={mapZoom.zoom}
-                          center={mapZoom.coordinates}
-                          onMoveEnd={({ coordinates, zoom }) => setMapZoom({ coordinates, zoom })}
-                          minZoom={0.5} maxZoom={8}
-                        >
-                          <Geographies geography={GEO_URL}>
-                            {({ geographies }) => geographies.map(geo => {
-                              const geoName = geo.properties.name
-                              const ourName = GEO_NAME_MAP[geoName]
-                              const isHighlighted = ourName && mapStats.values[ourName] !== undefined
-                              return (
-                                <Geography
-                                  key={geo.rsmKey}
-                                  geography={geo}
-                                  fill={mapFill(geoName, mapStats, activeChapter)}
-                                  stroke="#ffffff"
-                                  strokeWidth={0.5}
-                                  style={{
-                                    default: { outline: 'none' },
-                                    hover: {
-                                      fill: isHighlighted ? '#d97706' : '#d1dbe1',
-                                      outline: 'none',
-                                      cursor: isHighlighted ? 'pointer' : 'default',
-                                    },
-                                    pressed: { outline: 'none' },
-                                  }}
-                                  onMouseEnter={() => {
-                                    if (ourName && mapStats.counts[ourName]) {
-                                      setMapTooltip({
-                                        name: ourName,
-                                        grants: mapStats.counts[ourName],
-                                        value: mapStats.values[ourName] || 0,
-                                        chapters: mapStats.chapters[ourName]
-                                          ? [...mapStats.chapters[ourName]].join(', ') : '—',
-                                      })
-                                    }
-                                  }}
-                                  onMouseLeave={() => setMapTooltip(null)}
-                                />
-                              )
-                            })}
-                          </Geographies>
-                        </ZoomableGroup>
-                      </ComposableMap>
-
-                      {mapTooltip && (
-                        <div className="pointer-events-none absolute right-4 top-4 min-w-52 rounded-lg border border-slate-200 bg-white p-4 shadow-lg">
-                          <p className="mb-1.5 text-sm font-semibold text-slate-900">{mapTooltip.name}</p>
-                          <p className="text-xs text-slate-500">Chapter: <span className="font-medium text-slate-700">{mapTooltip.chapters}</span></p>
-                          <p className="text-xs text-slate-500">Grants: <span className="font-medium text-slate-700">{mapTooltip.grants}</span></p>
-                          <p className="text-xs text-slate-500">Total value: <span className="font-semibold text-brand-700">{usd0(mapTooltip.value)}</span></p>
-                        </div>
-                      )}
-
-                      <div className="absolute bottom-4 left-4 flex items-center gap-2 rounded-md bg-white/90 px-2.5 py-1.5 text-xs text-slate-500">
-                        <span>Lower</span>
-                        {['#c4c7ed', '#9094e2', '#6563cf', '#403e94'].map(c => (
-                          <span key={c} className="h-2.5 w-5 rounded-sm" style={{ background: c }} />
-                        ))}
-                        <span>Higher</span>
-                      </div>
-                    </div>
-                  </Card>
-
-                  {/* Records by country */}
-                  <Card className="mb-6" title="Records by country" subtitle="Number of grants per country">
-                    {countryData.length === 0 ? <Empty>No data yet</Empty> : (
-                      <ResponsiveContainer width="100%" height={220}>
-                        <BarChart data={countryData} margin={{ top: 18, right: 10, left: -20, bottom: 30 }} barSize={34}>
-                          <CartesianGrid strokeDasharray="3 3" stroke="#eef2f5" vertical={false} />
-                          <XAxis dataKey="name" tick={{ fontSize: 12, fill: '#5b6b78' }}
-                                 angle={-20} textAnchor="end" interval={0} axisLine={false} tickLine={false} />
-                          <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: '#94a3b8' }}
-                                 axisLine={false} tickLine={false} />
-                          <Tooltip contentStyle={TOOLTIP_STYLE} cursor={{ fill: 'rgba(31,86,104,0.05)' }} />
-                          <Bar dataKey="value" radius={[5, 5, 0, 0]} fill="#6563cf">
-                            <LabelList dataKey="value" position="top"
-                                       style={{ fontSize: '12px', fill: '#475569', fontWeight: 600 }} />
-                          </Bar>
-                        </BarChart>
-                      </ResponsiveContainer>
-                    )}
-                  </Card>
-
-                  {/* Activity */}
-                  <Card
-                    title="Grant activity over time"
-                    subtitle="Running totals by grant receiving date"
-                    action={
-                      <div className="flex gap-4 text-xs text-slate-500">
-                        <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full" style={{ background: BRAND_LINE }} />Grants</span>
-                        <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full" style={{ background: AMBER_LINE }} />Payments (USD)</span>
-                      </div>
-                    }
-                  >
-                    {activityData.length < 2 ? (
-                      <Empty height="h-48">Add grants with different receiving dates to see activity over time.</Empty>
-                    ) : (
-                      <ResponsiveContainer width="100%" height={270}>
-                        <ComposedChart data={activityData} margin={{ top: 10, right: 20, left: 0, bottom: 10 }}>
-                          <defs>
-                            <linearGradient id="grantsGrad" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="5%" stopColor={BRAND_LINE} stopOpacity={0.18} />
-                              <stop offset="95%" stopColor={BRAND_LINE} stopOpacity={0} />
-                            </linearGradient>
-                            <linearGradient id="paymentGrad" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="5%" stopColor={AMBER_LINE} stopOpacity={0.14} />
-                              <stop offset="95%" stopColor={AMBER_LINE} stopOpacity={0} />
-                            </linearGradient>
-                          </defs>
-                          <CartesianGrid strokeDasharray="3 3" stroke="#eef2f5" vertical={false} />
-                          <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#94a3b8' }}
-                                 axisLine={false} tickLine={false} interval="preserveStartEnd"
-                                 tickFormatter={formatDate} />
-                          <YAxis yAxisId="left" orientation="left" allowDecimals={false}
-                                 tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} width={30} />
-                          <YAxis yAxisId="right" orientation="right"
-                                 tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} width={50}
-                                 tickFormatter={v => `$${(v / 1000).toFixed(0)}k`} />
-                          <Tooltip
-                            contentStyle={TOOLTIP_STYLE}
-                            labelFormatter={formatDate}
-                            formatter={(value, name) => [
-                              name === 'payment' ? `$${value.toLocaleString()}` : value,
-                              name === 'payment' ? 'Payments (USD)' : 'Grants',
-                            ]}
-                          />
-                          <Area yAxisId="left" type="monotone" dataKey="grants" stroke={BRAND_LINE} strokeWidth={2.5}
-                                fill="url(#grantsGrad)" dot={{ fill: BRAND_LINE, r: 4, strokeWidth: 0 }}
-                                activeDot={{ r: 6, fill: BRAND_LINE, strokeWidth: 0 }} />
-                          <Area yAxisId="right" type="monotone" dataKey="payment" stroke={AMBER_LINE} strokeWidth={2.5}
-                                fill="url(#paymentGrad)" dot={{ fill: AMBER_LINE, r: 4, strokeWidth: 0 }}
-                                activeDot={{ r: 6, fill: AMBER_LINE, strokeWidth: 0 }} />
-                        </ComposedChart>
-                      </ResponsiveContainer>
-                    )}
-                  </Card>
+    <PipelineCard grants={filteredGrants} onStageSelect={onStageSelect} />
+    <div className="mb-6 grid gap-6 lg:grid-cols-2">
+      <FundingCard grants={filteredGrants} />
+      <CountryCard grants={filteredGrants} />
+    </div>
+    <PaymentsCard grants={filteredGrants} />
+    <div className="grid gap-6 lg:grid-cols-2">
+      <DonutCard
+        title="Report status" subtitle={`${filteredGrants.length} grants in total`}
+        data={reportStatusData} colorFor={n => STATUS_COLORS[n] || '#94a3b8'}
+      />
+      <DonutCard
+        title="Project type" subtitle="Expansion and non-expansion grants"
+        data={projectTypeData} colorFor={n => PROJECT_COLORS[n] || '#94a3b8'}
+      />
+    </div>
   </>
 }
