@@ -1,3 +1,4 @@
+import { apiFetch } from '../lib/api'
 import { useState, useEffect, useRef } from 'react'
 import FileUploadField from '../components/FileUploadField'
 import { useNavigate } from 'react-router-dom'
@@ -256,33 +257,38 @@ function AddGrant() {
     return 'Incomplete Information'
   }
 
-  // When secondary currency changes fetch exchange rate
   useEffect(() => {
-    if (form.secondary_currency) {
-      loadExchangeRate(form.secondary_currency)
-    } else {
-      setExchangeRate(1)
-      exchangeRateRef.current = 1
+    let active = true
+    const controller = new AbortController()
+    async function loadRate() {
+      await Promise.resolve()
+      if (!active) return
+      setRateLoading(true)
+      try {
+        const currency = form.secondary_currency
+        let rate = 1
+        if (currency) {
+          const response = await fetch(`https://open.er-api.com/v6/latest/${currency}`, { signal: controller.signal })
+          const data = await response.json()
+          if (!response.ok || !data.rates?.USD) throw new Error('Exchange rate unavailable')
+          rate = data.rates.USD
+        }
+        if (active) {
+          setExchangeRate(rate)
+          exchangeRateRef.current = rate
+        }
+      } catch (error) {
+        if (active && error.name !== 'AbortError') {
+          setExchangeRate(1)
+          exchangeRateRef.current = 1
+        }
+      } finally {
+        if (active) setRateLoading(false)
+      }
     }
+    loadRate()
+    return () => { active = false; controller.abort() }
   }, [form.secondary_currency])
-
-  async function loadExchangeRate(currency) {
-    setRateLoading(true)
-    try {
-      const res = await fetch(
-        `https://open.er-api.com/v6/latest/${currency}`
-      )
-      const data = await res.json()
-      const rate = data.rates?.USD || 1
-      setExchangeRate(rate)
-      exchangeRateRef.current = rate
-    } catch {
-      setExchangeRate(1)
-      exchangeRateRef.current = 1
-    } finally {
-      setRateLoading(false)
-    }
-  }
 
   function handleChange(e) {
     const { name, value } = e.target
@@ -331,9 +337,8 @@ function AddGrant() {
 async function handleSubmit() {
     setLoading(true)
     setError('')
-    console.log('Form data:', form)  // add this line
     try {
-      const response = await fetch(
+      const response = await apiFetch(
         `${import.meta.env.VITE_API_URL}/api/grants`,
         {
           method: 'POST',

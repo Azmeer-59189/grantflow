@@ -18,9 +18,8 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
 
-_PARENTS = Path(__file__).resolve().parents
-PROJECT_ROOT = _PARENTS[3] if len(_PARENTS) > 3 else _PARENTS[1]
-load_dotenv(PROJECT_ROOT / ".env")
+from config import PROJECT_ROOT
+
 
 SHEETS_READONLY_SCOPE = "https://www.googleapis.com/auth/spreadsheets.readonly"
 DEFAULT_TAB_NAME = os.getenv("GOOGLE_SHEET_TAB", "Grants")

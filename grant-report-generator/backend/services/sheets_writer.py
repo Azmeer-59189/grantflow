@@ -9,9 +9,8 @@ from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
-_PARENTS = Path(__file__).resolve().parents
-PROJECT_ROOT = _PARENTS[3] if len(_PARENTS) > 3 else _PARENTS[1]
-load_dotenv(PROJECT_ROOT / ".env")
+from config import PROJECT_ROOT
+
 
 SHEETS_WRITE_SCOPE = "https://www.googleapis.com/auth/spreadsheets"
 
@@ -168,8 +167,8 @@ def append_grant(grant: dict, tab_name: str = DEFAULT_TAB_NAME) -> None:
         )
         service.spreadsheets().values().append(
             spreadsheetId=sheet_id,
-            range=f"{tab_name}!{GRANT_NUMBER_COL}:{GRANT_NUMBER_COL}",
-            valueInputOption="USER_ENTERED",
+            range=f"{tab_name}!A:{LAST_COLUMN}",
+            valueInputOption="RAW",
             insertDataOption="INSERT_ROWS",
             body={"values": [row_values]}
         ).execute()
@@ -226,7 +225,7 @@ def update_grant(
         service.spreadsheets().values().update(
             spreadsheetId=sheet_id,
             range=f"{tab_name}!A{row_index}:{LAST_COLUMN}{row_index}",
-            valueInputOption="USER_ENTERED",
+            valueInputOption="RAW",
             body={"values": [row_values]}
         ).execute()
 

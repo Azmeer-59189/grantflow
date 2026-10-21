@@ -1,5 +1,6 @@
 """Generate a per-grant PDF report matching IHHN GrantFlow template."""
 
+from xml.sax.saxutils import escape
 from datetime import date
 from pathlib import Path
 
@@ -44,7 +45,7 @@ def _status_color(value: str):
 
 def _val(grant: dict, key: str, fallback: str = "—") -> str:
     v = grant.get(key, "")
-    return str(v).strip() if v else fallback
+    return escape(str(v).strip()) if v is not None and v != '' else fallback
 
 
 def _money(grant: dict, key: str, currency: str = "") -> str:
@@ -121,7 +122,7 @@ def create_pdf_report(
     story.append(Paragraph(grant_number, title_style))
     story.append(Paragraph(
         f"Utilization Report Summary · "
-        f"{_val(grant, 'region')} · "
+        f"{_val(grant, 'country')} · "
         f"Generated {date.today().strftime('%B %d, %Y')}",
         subtitle_style
     ))
@@ -180,7 +181,7 @@ def create_pdf_report(
         ]))
         return box
 
-    currency = _val(grant, "currency", "USD")
+    currency = _val(grant, "secondary_currency", "USD")
 
     # ── Section 1: Grant Overview ──────────────────────────────────────────
     if show('overview'):
@@ -205,7 +206,7 @@ def create_pdf_report(
             ("Sub Grant Amount",          _money(grant, "sub_grant_amount", currency)),
             ("Current Payment (orig)",    _money(grant, "current_payment_orig", currency)),
             ("Current Payment (USD)",     _money(grant, "current_payment_usd")),
-            ("Remaining Payment (USD)",   _money(grant, "remaining_payment")),
+            ("Remaining Payment (USD)",   _money(grant, "remaining_payment_usd")),
             ("Payment Status",            payment_status),
             ("Payment Reference",         _val(grant, "payment_reference")),
             ("Payment Date",              _val(grant, "payment_date")),
@@ -295,8 +296,8 @@ def create_pdf_report(
         story.append(Paragraph("PICTURES", section_style))
         story.append(detail_table([
             ("Pictures' Status", pic_status),
-            ("POC for Pictures", _val(grant, "poc_for_pictures")),
-            ("Pictures Link",    _val(grant, "pictures")),
+            ("POC for Pictures", _val(grant, "department_for_pictures")),
+            ("Pictures Link",    _val(grant, "picture")),
         ]))
 
     # ── Section 9: Report Status ──────────────────────────────────────────

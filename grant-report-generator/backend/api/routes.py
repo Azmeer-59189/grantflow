@@ -1,12 +1,21 @@
 """API routes for GrantFlow — 50 column structure."""
 
-from datetime import datetime
+from datetime import datetime, timezone
+import os
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
+from starlette.background import BackgroundTask
+from api.auth import require_user
+import tempfile
+import shutil
+import re
+import logging
+from services import supabase_service
+from services.sheets_writer import GoogleSheetsConfigurationError as WriteConfigurationError
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, ConfigDict
 
 from services.data_processor import (
     GrantDataValidationError,
@@ -36,17 +45,17 @@ from services.template_report import (
 )
 
 
-router = APIRouter(prefix="/api", tags=["Grants"])
-REPORTS_DIR = Path(__file__).resolve().parents[1] / "generated_reports"
+router = APIRouter(prefix="/api", tags=["Grants"], dependencies=[Depends(require_user)])
 
 
 # ── Request body model — 50 columns ────────────────────────────────────────
 class ReportSections(BaseModel):
     """Which sections to include in the report."""
-    sections: dict = {}
+    sections: dict[str, bool] = Field(default_factory=dict)
 
 class GrantPayload(BaseModel):
     """What the frontend sends when creating or updating a grant."""
+    model_config = ConfigDict(allow_inf_nan=False)
     year: Optional[str] = ""
     region: Optional[str] = ""
     country: Optional[str] = ""
@@ -130,7 +139,28 @@ def _get_single_grant(grant_number: str) -> dict:
 @router.get("/grants")
 def get_grants() -> dict:
     """Return all grants and dashboard KPIs."""
-    return _get_summary().as_dict()
+    try:
+        rows = fetch_grant_rows()
+        result = process_grant_rows(rows).as_dict()
+    except GrantDataValidationError as error:
+        raise HTTPException(422, str(error)) from error
+    except (GoogleSheetsConfigurationError, GoogleSheetsReadError) as error:
+        try:
+            cached = supabase_service.get_latest_sheet_cache()
+            cached_at = datetime.fromisoformat(cached['cached_at'].replace('Z', '+00:00')) if cached else None
+            age = (datetime.now(timezone.utc) - cached_at).total_seconds() if cached_at else float('inf')
+            if age < 0 or age > int(os.getenv('SHEET_CACHE_MAX_AGE_SECONDS', '86400')):
+                raise ValueError('No recent snapshot available')
+            result = process_grant_rows(cached['data']).as_dict()
+            result['cache_warning'] = f"Google Sheets is unavailable. Showing a saved snapshot from {cached['cached_at']}. Refresh before making decisions."
+            return result
+        except Exception:
+            raise HTTPException(503, 'Google Sheets is unavailable and no recent valid snapshot is available.') from error
+    try:
+        supabase_service.cache_sheet_data(rows)
+    except Exception:
+        logging.exception('Could not save sheet snapshot')
+    return result
 
 
 # ── GET /api/grants/{grant_number} ───────────────────────────────────────────
@@ -157,12 +187,12 @@ def add_grant(payload: GrantPayload) -> dict:
                 status_code=409,
                 detail=f"Grant number '{grant_data['grant_number']}' already exists."
             )
-    except GoogleSheetsWriteError as error:
+    except (GoogleSheetsWriteError, WriteConfigurationError) as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
 
     try:
         append_grant(grant_data)
-    except GoogleSheetsWriteError as error:
+    except (GoogleSheetsWriteError, WriteConfigurationError) as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
 
     return {
@@ -176,6 +206,8 @@ def add_grant(payload: GrantPayload) -> dict:
 def edit_grant(grant_number: str, payload: GrantPayload) -> dict:
     """Update an existing grant row in the Google Sheet."""
     grant_data = payload.model_dump()
+    if grant_data['grant_number'] != grant_number:
+        raise HTTPException(422, 'Grant number cannot be changed when editing a grant.')
 
     try:
         validate_grant_dict(grant_data, is_new=False)
@@ -184,7 +216,7 @@ def edit_grant(grant_number: str, payload: GrantPayload) -> dict:
 
     try:
         update_grant(grant_number, grant_data)
-    except GoogleSheetsWriteError as error:
+    except (GoogleSheetsWriteError, WriteConfigurationError) as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
 
     return {
@@ -194,67 +226,54 @@ def edit_grant(grant_number: str, payload: GrantPayload) -> dict:
 
 
 # ── POST /api/reports/pdf & word/{grant_number} ─────────────────────────────────────
-@router.post("/reports/pdf/{grant_number}")
-def download_pdf(grant_number: str, payload: ReportSections = None) -> FileResponse:
+@router.get('/reports/history')
+def report_history() -> list:
+    try:
+        return supabase_service.get_report_history()
+    except Exception as error:
+        logging.exception('Could not load report history')
+        raise HTTPException(503, 'Report history is unavailable.') from error
+
+
+def _download_report(grant_number, payload, report_format, user):
     grant = _get_single_grant(grant_number)
     sections = payload.sections if payload else {}
-    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    output_path = REPORTS_DIR / f"grant-{grant_number}-{timestamp}.pdf"
-
-    if has_template(grant):
-        docx_path = REPORTS_DIR / f"grant-{grant_number}-{timestamp}.docx"
-        try:
-            create_template_word_report(grant, docx_path)
-            convert_docx_to_pdf(docx_path, output_path)
-        except TemplateReportError as error:
-            raise HTTPException(status_code=503, detail=str(error)) from error
-    else:
-        try:
-            create_pdf_report(grant, output_path, sections=sections)
-        except Exception as error:
-            raise HTTPException(status_code=500, detail=f"Could not generate PDF: {error}") from error
-
-    return FileResponse(output_path, media_type="application/pdf", filename=output_path.name)
-
-
-@router.post("/reports/word/{grant_number}")
-def download_word(grant_number: str, payload: ReportSections = None) -> FileResponse:
-    grant = _get_single_grant(grant_number)
-    sections = payload.sections if payload else {}
-    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    output_path = REPORTS_DIR / f"grant-{grant_number}-{timestamp}.docx"
-    ...
-
+    # Fixed chapter layouts apply to complete reports; customized reports use
+    # the generic layout so every unchecked section is excluded.
+    use_template = has_template(grant) and all(sections.values())
+    directory = Path(tempfile.mkdtemp(prefix='grantflow-'))
+    safe_number = re.sub(r'[^A-Za-z0-9_-]', '_', grant_number)[:80] or 'report'
+    output = directory / f'grant-{safe_number}.{report_format}'
     try:
-        if has_template(grant):
-            create_template_word_report(grant, output_path)
+        if use_template:
+            docx = output if report_format == 'docx' else output.with_suffix('.docx')
+            create_template_word_report(grant, docx)
+            if report_format == 'pdf':
+                convert_docx_to_pdf(docx, output)
+        elif report_format == 'pdf':
+            create_pdf_report(grant, output, sections=sections)
         else:
-            create_word_report(grant, output_path, sections=sections)
-    except TemplateReportError as error:
-        raise HTTPException(status_code=503, detail=str(error)) from error
+            create_word_report(grant, output, sections=sections)
+        supabase_service.save_report_metadata(
+            generated_by=str(user.id), report_format='PDF' if report_format == 'pdf' else 'Word',
+            row_count=1, total_received=grant.get('current_payment_usd', 0),
+            total_beneficiaries=int(grant.get('no_of_beneficiaries', 0)),
+        )
     except Exception as error:
-        raise HTTPException(status_code=500, detail=f"Could not generate Word report: {error}") from error
+        shutil.rmtree(directory, ignore_errors=True)
+        logging.exception('Report generation failed')
+        message = str(error) if isinstance(error, TemplateReportError) else 'Could not generate or record report. Please try again.'
+        raise HTTPException(503, message) from error
+    media_type = 'application/pdf' if report_format == 'pdf' else 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    return FileResponse(output, media_type=media_type, filename=output.name,
+                        background=BackgroundTask(shutil.rmtree, directory, ignore_errors=True))
 
-    return FileResponse(
-        output_path,
-        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        filename=output_path.name,
-    )
 
-    try:
-        if has_template(grant):
-            create_template_word_report(grant, output_path)
-        else:
-            create_word_report(grant, output_path, sections=sections)
-    except TemplateReportError as error:
-        raise HTTPException(status_code=503, detail=str(error)) from error
-    except Exception as error:
-        raise HTTPException(status_code=500, detail=f"Could not generate Word report: {error}") from error
+@router.post('/reports/pdf/{grant_number}')
+def download_pdf(grant_number: str, payload: ReportSections = None, user=Depends(require_user)):
+    return _download_report(grant_number, payload, 'pdf', user)
 
-    return FileResponse(
-        output_path,
-        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        filename=output_path.name,
-    )
+
+@router.post('/reports/word/{grant_number}')
+def download_word(grant_number: str, payload: ReportSections = None, user=Depends(require_user)):
+    return _download_report(grant_number, payload, 'docx', user)

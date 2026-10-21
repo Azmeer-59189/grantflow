@@ -3,6 +3,7 @@
 from __future__ import annotations
 from dataclasses import asdict, dataclass
 import re
+import math
 from typing import Any
 
 # Required fields for report status calculation
@@ -70,9 +71,12 @@ def _parse_number(value: str, field_name: str, row_number: int) -> float:
     """Parse a number from a string."""
     if not str(value).strip():
         return 0.0
-    cleaned = re.sub(r"[^0-9.\-]", "", str(value))
+    cleaned = re.sub(r"\b(?:USD|CAD|EUR|AED|AUD|GBP|PKR)\b", "", str(value), flags=re.IGNORECASE)
+    cleaned = re.sub(r"[\s,$£€]", "", cleaned)
     try:
-        result = float(cleaned) if cleaned else 0.0
+        result = float(cleaned)
+        if not math.isfinite(result):
+            raise ValueError("Non-finite number")
     except ValueError as error:
         raise GrantDataValidationError(
             f"Row {row_number}: {field_name} must be a number."
@@ -368,7 +372,7 @@ def process_grant_rows(rows: list[dict[str, str]]) -> GrantSummary:
                 item_description=row.get("item_description", "").strip(),
             ))
         except GrantDataValidationError:
-            continue
+            raise
 
     # Calculate KPIs
     total_paid_usd = sum(

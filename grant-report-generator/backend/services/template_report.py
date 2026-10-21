@@ -218,7 +218,7 @@ def create_template_word_report(grant: dict, output_path: Path) -> Path:
             f"/ project type '{grant.get('project_type', '')}'."
         )
     tpl = DocxTemplate(str(template_path))
-    tpl.render(_build_context(grant, tpl))
+    tpl.render(_build_context(grant, tpl), autoescape=True)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     tpl.save(str(output_path))
     return output_path

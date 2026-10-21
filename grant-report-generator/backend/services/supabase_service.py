@@ -14,9 +14,8 @@ from supabase import Client, create_client
 
 # The shared .env file is three folders above this file during local development.
 # Railway will provide the same variables as deployment environment variables.
-_PARENTS = Path(__file__).resolve().parents
-PROJECT_ROOT = _PARENTS[3] if len(_PARENTS) > 3 else _PARENTS[1]
-load_dotenv(PROJECT_ROOT / ".env")
+from config import PROJECT_ROOT
+
 
 
 class SupabaseConfigurationError(RuntimeError):

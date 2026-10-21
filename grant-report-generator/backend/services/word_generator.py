@@ -99,117 +99,43 @@ def _add_detail_table(document: Document, rows: list[tuple]) -> None:
         _font(value_cell.paragraphs[0].add_run(value), 10, color=color)
 
 
-def create_word_report(grant: dict, output_path: Path) -> Path:
-    """Generate a Word report for a single grant.
+REPORT_FIELDS = {
+    'overview': ('Grant Overview', 'year country chapter project_type supplier item department po_wo_number sub_grant_no link_to_complete_documents'),
+    'financial': ('Financial Summary', 'secondary_currency total_grant_amount_orig total_grant_amount_usd sub_grant_amount current_payment_orig current_payment_usd remaining_payment_orig remaining_payment_usd payment_status payment_reference'),
+    'dates': ('Key Dates', 'grant_receiving_date grant_application_sent_date date_dr_zafar_signed_application date_of_approval_by_khaleeq_sb date_of_email_to_int_chapter payment_date date_ceo_signed_application'),
+    'shipping': ('Shipping & Documents', 'shipping_documents_status shipping_documents_comment link_to_shipping_documents commercial_invoice_no bill_of_lading packing_list_reference'),
+    'grn': ('GRN / Receiving', 'grn_receiving_status receiving_date grn_number link_to_grn grn_receiving_comments'),
+    'location': ('Installation & Location', 'installation_date location building_name floor room'),
+    'item': ('Item Details', 'item_model item_serial_number quantity ihhn_asset_tag_number no_of_beneficiaries item_description'),
+    'pictures': ('Pictures', 'department_for_pictures picture pictures_status'),
+    'report': ('Report Status', 'report_status link_to_utilization_report'),
+}
 
-    grant: dictionary with snake_case keys from the sheet
-    output_path: where to save the .docx file
-    """
+
+def create_word_report(grant: dict, output_path: Path, sections: dict | None = None) -> Path:
+    """Generate a report using the current sheet schema and selected sections."""
+    sections = sections or {}
     output_path.parent.mkdir(parents=True, exist_ok=True)
     document = Document()
-
-    # Page margins
     section = document.sections[0]
     section.top_margin = section.bottom_margin = Inches(0.8)
     section.left_margin = section.right_margin = Inches(0.75)
-    section.header_distance = section.footer_distance = Inches(0.49)
-
-    # Default font
-    normal = document.styles["Normal"]
-    normal.font.name = "Calibri"
-    normal._element.rPr.rFonts.set(qn("w:ascii"), "Calibri")
-    normal._element.rPr.rFonts.set(qn("w:hAnsi"), "Calibri")
-    normal.font.size = Pt(10.5)
-
-    # ── Page Header ────────────────────────────────────────────────────────
-    header = section.header.paragraphs[0]
-    header.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-    _font(
-        header.add_run("IHHN GrantFlow | Grant Utilization Report"),
-        8.5, color=MUTED
-    )
-
-    # ── Title Block ────────────────────────────────────────────────────────
-    title = document.add_paragraph()
-    title.paragraph_format.space_after = Pt(2)
-    _font(title.add_run("IHHN GrantFlow"), 24, bold=True, color=NAVY)
-
-    subtitle = document.add_paragraph()
-    subtitle.paragraph_format.space_after = Pt(2)
-    _font(subtitle.add_run("Grant Utilization Report"), 14, bold=True, color=BLUE)
-
-    generated = document.add_paragraph()
-    generated.paragraph_format.space_after = Pt(16)
-    _font(
-        generated.add_run(f"Generated: {date.today().isoformat()}"),
-        9, color=MUTED
-    )
-
-    # ── Grant Details Section ──────────────────────────────────────────────
-    _add_section_heading(document, "Grant Details")
-    _add_detail_table(document, [
-        ("Grant Number", grant.get("grant_number", "—")),
-        ("Supplier",     grant.get("supplier", "—")),
-        ("Item",         grant.get("item", "—")),
-        ("Department",   grant.get("department", "—")),
-        ("Currency",     grant.get("currency", "—")),
-    ])
-
-    # ── Payment Section ────────────────────────────────────────────────────
-    _add_section_heading(document, "Payment Summary")
-    payment_status = grant.get("payment_status", "—")
-
-    try:
-        payment_made = float(grant.get("payment_made", 0))
-        payment_usd = float(grant.get("payment_made_usd", 0))
-    except (ValueError, TypeError):
-        payment_made = 0.0
-        payment_usd = 0.0
-
-    _add_detail_table(document, [
-        (
-            "Payment Made",
-            f"{grant.get('currency', '')} {payment_made:,.2f}"
-        ),
-        (
-            "Payment Made (USD)",
-            f"$ {payment_usd:,.2f}"
-        ),
-        (
-            "Payment Status",
-            payment_status,
-            _status_color(payment_status)
-        ),
-    ])
-
-    # ── Status Section ─────────────────────────────────────────────────────
-    _add_section_heading(document, "Status Overview")
-    report_status = grant.get("report_status", "—")
-    shipping = grant.get("shipping", "—")
-    receiving = grant.get("receiving", "—")
-
-    _add_detail_table(document, [
-        ("Report Status", report_status, _status_color(report_status)),
-        ("Shipping",      shipping,      _status_color(shipping)),
-        ("Receiving",     receiving,     _status_color(receiving)),
-    ])
-
-    # ── Footer Note ────────────────────────────────────────────────────────
-    note = document.add_paragraph()
-    note.paragraph_format.space_before = Pt(24)
-    _font(
-        note.add_run("Confidential — For internal use only."),
-        9, color=MUTED
-    )
-
-    # Page footer
-    footer = section.footer.paragraphs[0]
-    footer.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    _font(
-        footer.add_run("IHHN GrantFlow | Internal Use Only"),
-        8, color=MUTED
-    )
-
+    document.add_heading('IHHN GrantFlow | Grant Utilization Report', 0)
+    document.add_paragraph(f"Grant: {grant.get('grant_number', '')}")
+    document.add_paragraph(f'Generated: {date.today().isoformat()}')
+    for key, (title, fields) in REPORT_FIELDS.items():
+        if not sections.get(key, True):
+            continue
+        _add_section_heading(document, title)
+        rows = []
+        for field in fields.split():
+            value = grant.get(field)
+            if value is None or value == '':
+                value = '?'
+            elif isinstance(value, (int, float)):
+                value = f'{value:,.2f}'
+            rows.append((field.replace('_', ' ').title(), value))
+        _add_detail_table(document, rows)
+    document.add_paragraph('Confidential ? For internal use only.')
     document.save(output_path)
     return output_path
-

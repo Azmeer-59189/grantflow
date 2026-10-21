@@ -5,6 +5,7 @@ import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import AddGrant from './pages/AddGrant'
 import EditGrant from './pages/EditGrant'
+import History from './pages/History'
 
 
 function App() {
@@ -52,7 +53,7 @@ function App() {
             : <Navigate to="/login" />}
         />
 
-        // Add this route
+        <Route path="/history" element={session ? <History /> : <Navigate to="/login" />} />
         <Route
           path="/edit-grant/:grantNumber"
           element={session

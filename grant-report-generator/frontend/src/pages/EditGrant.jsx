@@ -1,3 +1,4 @@
+import { apiFetch } from '../lib/api'
 import { useState, useEffect, useRef } from 'react'
 import FileUploadField from '../components/FileUploadField'
 import { useNavigate, useParams } from 'react-router-dom'
@@ -220,24 +221,18 @@ function EditGrant() {
   }
 
   useEffect(() => {
-    fetchGrant()
-  }, [])
-
-  useEffect(() => {
-    if (form.secondary_currency) {
-      loadExchangeRate(form.secondary_currency)
-    }
-  }, [form.secondary_currency])
-
-  async function fetchGrant() {
+    let active = true
+    async function fetchGrant() {
     try {
-      const response = await fetch(
+      const response = await apiFetch(
         `${import.meta.env.VITE_API_URL}/api/grants/${encodeURIComponent(grantNumber)}`
       )
       const data = await response.json()
       if (!response.ok) throw new Error(data.detail || 'Grant not found')
 
+      if (!active) return
       setForm({
+        year: data.year || '',
         country: data.country || '',
         chapter: data.chapter || '',
         grant_number: data.grant_number || '',
@@ -294,33 +289,48 @@ function EditGrant() {
         item_description: data.item_description || '',
       })
 
-      if (data.secondary_currency) {
-        await loadExchangeRate(data.secondary_currency)
-      }
     } catch (err) {
-      setError(err.message)
+      if (active) setError(err.message)
     } finally {
-      setFetching(false)
+      if (active) setFetching(false)
     }
   }
+    fetchGrant()
+    return () => { active = false }
+  }, [grantNumber])
 
-  async function loadExchangeRate(currency) {
-    setRateLoading(true)
-    try {
-      const res = await fetch(
-        `https://open.er-api.com/v6/latest/${currency}`
-      )
-      const data = await res.json()
-      const rate = data.rates?.USD || 1
-      setExchangeRate(rate)
-      exchangeRateRef.current = rate
-    } catch {
-      setExchangeRate(1)
-      exchangeRateRef.current = 1
-    } finally {
-      setRateLoading(false)
+  useEffect(() => {
+    let active = true
+    const controller = new AbortController()
+    async function loadRate() {
+      await Promise.resolve()
+      if (!active) return
+      setRateLoading(true)
+      try {
+        const currency = form.secondary_currency
+        let rate = 1
+        if (currency) {
+          const response = await fetch(`https://open.er-api.com/v6/latest/${currency}`, { signal: controller.signal })
+          const data = await response.json()
+          if (!response.ok || !data.rates?.USD) throw new Error('Exchange rate unavailable')
+          rate = data.rates.USD
+        }
+        if (active) {
+          setExchangeRate(rate)
+          exchangeRateRef.current = rate
+        }
+      } catch (error) {
+        if (active && error.name !== 'AbortError') {
+          setExchangeRate(1)
+          exchangeRateRef.current = 1
+        }
+      } finally {
+        if (active) setRateLoading(false)
+      }
     }
-  }
+    loadRate()
+    return () => { active = false; controller.abort() }
+  }, [form.secondary_currency])
 
   function handleChange(e) {
     const { name, value } = e.target
@@ -356,7 +366,7 @@ function EditGrant() {
     setLoading(true)
     setError('')
     try {
-      const response = await fetch(
+      const response = await apiFetch(
         `${import.meta.env.VITE_API_URL}/api/grants/${encodeURIComponent(grantNumber)}`,
         {
           method: 'PUT',

@@ -1,3 +1,4 @@
+import { apiFetch } from '../lib/api'
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../supabase'
@@ -318,7 +319,7 @@ function Dashboard({ session }) {
   async function fetchGrants() {
     try {
       setLoading(true)
-      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/grants`)
+      const response = await apiFetch(`${import.meta.env.VITE_API_URL}/api/grants`)
       const json = await response.json()
       if (!response.ok) throw new Error(json.detail || 'Failed to load')
       setData(json)
@@ -337,15 +338,18 @@ function Dashboard({ session }) {
   async function downloadReport(grantNumber, format) {
     setReportLoading(true)
     try {
-      const response = await fetch(
-        `${import.meta.env.VITE_API_URL}/api/reports/${format}/${grantNumber}`,
+      const response = await apiFetch(
+        `${import.meta.env.VITE_API_URL}/api/reports/${format}/${encodeURIComponent(grantNumber)}`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ sections: selectedSections }),
         }
       )
-      if (!response.ok) throw new Error('Report generation failed')
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}))
+        throw new Error(error.detail || 'Report generation failed')
+      }
       const blob = await response.blob()
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement('a')
@@ -444,6 +448,7 @@ function Dashboard({ session }) {
 
   return (
     <div className="flex min-h-screen bg-canvas">
+      {data?.cache_warning && <div role="alert" className="fixed bottom-4 left-4 right-4 z-50 rounded-lg border border-amber-400 bg-amber-50 p-4 text-sm text-amber-900">{data.cache_warning}</div>}
 
       {/* ── Side rail ─────────────────────────────────────────────── */}
       <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col bg-brand-900 text-white md:flex">
@@ -455,6 +460,7 @@ function Dashboard({ session }) {
           </div>
         </div>
         <nav className="mt-2 flex-1 space-y-1 px-3">
+          <button onClick={() => navigate('/history')} className="w-full rounded-lg px-3 py-2.5 text-left text-sm text-white">Report history</button>
           {NAV.map(item => (
             <button
               key={item.id}
@@ -908,7 +914,7 @@ function Dashboard({ session }) {
                               <td className="whitespace-nowrap px-4 py-3 text-right" onClick={e => e.stopPropagation()}>
                                 <div className="flex justify-end gap-2">
                                   <button
-                                    onClick={() => navigate(`/edit-grant/${grant.grant_number}`)}
+                                    onClick={() => navigate(`/edit-grant/${encodeURIComponent(grant.grant_number)}`)}
                                     className="rounded-md border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 transition hover:bg-slate-50"
                                   >
                                     Edit
@@ -952,7 +958,7 @@ function Dashboard({ session }) {
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
                   <button
-                    onClick={() => { setDetailGrant(null); navigate(`/edit-grant/${g.grant_number}`) }}
+                    onClick={() => { setDetailGrant(null); navigate(`/edit-grant/${encodeURIComponent(g.grant_number)}`) }}
                     className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
                   >
                     Edit
@@ -1075,6 +1081,7 @@ function Dashboard({ session }) {
 
             <div className="overflow-y-auto px-6 py-5">
               <p className="mb-3 text-sm font-medium text-slate-700">Sections to include</p>
+              <p className="mb-3 text-xs text-slate-500">Complete reports use the chapter template when available. Selecting fewer sections uses the standard report layout.</p>
               <div className="grid gap-1 sm:grid-cols-2">
                 {SECTION_LABELS.map(section => (
                   <label key={section.key}

@@ -5,17 +5,12 @@ Run locally from this directory with:
 """
 
 import os
-from pathlib import Path
-
-from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+import config
 from api.routes import router as grants_router
 
-
-PROJECT_ROOT = Path(__file__).resolve().parent
-load_dotenv(PROJECT_ROOT / ".env")
 
 app = FastAPI(
     title="GrantFlow API",
@@ -23,17 +18,9 @@ app = FastAPI(
     description="Internal API for preparing and generating charity grant reports.",
 )
 
-import gc
-
-@app.middleware("http")
-async def cleanup_middleware(request, call_next):
-    response = await call_next(request)
-    gc.collect()  # Force garbage collection after each request
-    return response
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[origin.strip().rstrip("/") for origin in os.getenv("FRONTEND_URL", "http://localhost:5173").split(",") if origin.strip()],
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -5,7 +5,7 @@ const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
-    persistSession: false,
+    persistSession: true,
     storage: window.sessionStorage,
   }
 })
@@ -16,7 +16,7 @@ export async function uploadFile(file, folder = 'pictures') {
   const fileName = `${folder}/${Date.now()}-${Math.random()
     .toString(36).substring(2)}.${fileExt}`
 
-  const { data, error } = await supabase.storage
+  const { error } = await supabase.storage
     .from('grant-pictures')
     .upload(fileName, file, {
       cacheControl: '3600',
