@@ -1,16 +1,22 @@
 import { useState } from 'react'
-import { uploadFile } from '../supabase'
+import { uploadFile, UPLOAD_TYPES, MAX_UPLOAD_BYTES } from '../supabase'
 
-function FileUploadField({ name, label, value, onChange, folder = 'general' }) {
+const ACCEPT = Object.keys(UPLOAD_TYPES).join(',')
+
+function FileUploadField({ name, label, value, onChange, folder = 'general', uploads }) {
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState('')
 
   async function handleFileChange(e) {
     const file = e.target.files[0]
+    e.target.value = ''  // allow choosing the same file again after an error
     if (!file) return
 
-    // Max 10MB
-    if (file.size > 10 * 1024 * 1024) {
+    if (!UPLOAD_TYPES[file.type]) {
+      setUploadError('Upload an image, PDF, Word or Excel file.')
+      return
+    }
+    if (file.size > MAX_UPLOAD_BYTES) {
       setUploadError('File too large. Max 10MB.')
       return
     }
@@ -19,15 +25,22 @@ function FileUploadField({ name, label, value, onChange, folder = 'general' }) {
     setUploadError('')
 
     try {
-      const url = await uploadFile(file, folder)
+      const { url, path } = await uploadFile(file, folder)
+      uploads?.track(url, path)
+      if (value) uploads?.discard(value)  // only deletes files uploaded on this page
       // Simulate onChange event so form state updates
       onChange({ target: { name, value: url } })
     } catch (err) {
-      setUploadError('Upload failed. Try again.')
+      setUploadError(err.message?.includes('mime') ? 'This file type is not allowed.' : 'Upload failed. Try again.')
       console.error(err)
     } finally {
       setUploading(false)
     }
+  }
+
+  function handleRemove() {
+    uploads?.discard(value)
+    onChange({ target: { name, value: '' } })
   }
 
   return (
@@ -52,7 +65,8 @@ function FileUploadField({ name, label, value, onChange, folder = 'general' }) {
             View
           </a>
           <button
-            onClick={() => onChange({ target: { name, value: '' } })}
+            type="button"
+            onClick={handleRemove}
             className="text-xs text-red-400 hover:text-red-600 flex-shrink-0"
           >
             Remove
@@ -74,7 +88,7 @@ function FileUploadField({ name, label, value, onChange, folder = 'general' }) {
             className="hidden"
             onChange={handleFileChange}
             disabled={uploading}
-            accept="image/*,.pdf,.doc,.docx,.xls,.xlsx"
+            accept={ACCEPT}
           />
           {uploading ? (
             <span className="text-gray-400">Uploading...</span>
@@ -82,7 +96,7 @@ function FileUploadField({ name, label, value, onChange, folder = 'general' }) {
             <span>
               📎 {value ? 'Replace file' : 'Upload file'}
               <span className="text-xs text-gray-400 ml-1">
-                (image, PDF, doc — max 10MB)
+                (image, PDF, Word, Excel — max 10MB)
               </span>
             </span>
           )}
@@ -90,7 +104,7 @@ function FileUploadField({ name, label, value, onChange, folder = 'general' }) {
       </div>
 
       {uploadError && (
-        <p className="text-xs text-red-500 mt-1">{uploadError}</p>
+        <p role="alert" className="text-xs text-red-500 mt-1">{uploadError}</p>
       )}
     </div>
   )

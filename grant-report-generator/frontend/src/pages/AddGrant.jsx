@@ -2,8 +2,12 @@ import GrantSections from '../components/GrantSections'
 import FormProgress from '../components/FormProgress'
 import useUnsavedChanges from '../hooks/useUnsavedChanges'
 import { apiFetch } from '../lib/api'
-import { useState, useEffect, useRef } from 'react'
+import { useState } from 'react'
 import FileUploadField from '../components/FileUploadField'
+import ExchangeRateField from '../components/ExchangeRateField'
+import useExchangeRate from '../hooks/useExchangeRate'
+import useUploadCleanup from '../hooks/useUploadCleanup'
+import { applyAmounts, calcReportStatus, toPayload } from '../lib/grantForm'
 import { useNavigate } from 'react-router-dom'
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -230,122 +234,48 @@ function AddGrant() {
   const navigate = useNavigate()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const [exchangeRate, setExchangeRate] = useState(1)
-  const [rateLoading, setRateLoading] = useState(false)
-  const exchangeRateRef = useRef(1)
   const [form, setForm] = useState(INITIAL_FORM)
+  const fx = useExchangeRate()
+  const uploads = useUploadCleanup()
+  const rateMissing = Boolean(form.secondary_currency) && !fx.rate
 
-  // Calculate report status on the fly for preview
   const { dirty, markSaved } = useUnsavedChanges(form)
-
-  function calcReportStatus(f) {
-    const requiredFields = [
-      'year', 'country', 'chapter', 'grant_number', 'project_type', 'department',
-      'supplier', 'item', 'po_wo_number', 'sub_grant_no',
-      'link_to_complete_documents', 'secondary_currency',
-      'total_grant_amount_orig', 'total_grant_amount_usd',
-      'current_payment_orig', 'current_payment_usd',
-      'payment_status', 'payment_reference',
-      'grant_receiving_date', 'grant_application_sent_date',
-      'date_dr_zafar_signed_application', 'date_of_approval_by_khaleeq_sb',
-      'date_of_email_to_int_chapter', 'payment_date',
-      'date_ceo_signed_application',
-      'shipping_documents_status', 'shipping_documents_comment',
-      'link_to_shipping_documents', 'commercial_invoice_no',
-      'bill_of_lading', 'packing_list_reference',
-      'grn_receiving_status', 'receiving_date', 'grn_number',
-      'link_to_grn', 'grn_receiving_comments', 'installation_date',
-      'location', 'building_name', 'floor', 'room',
-      'item_model', 'item_serial_number', 'quantity',
-      'ihhn_asset_tag_number', 'department_for_pictures',
-      'picture', 'pictures_status', 'no_of_beneficiaries',
-      'item_description',
-    ]
-    const allFilled = requiredFields.every(k => String(f[k] || '').trim())
-    const hasReportLink = String(f.link_to_utilization_report || '').trim()
-    if (allFilled && hasReportLink) return 'Complete'
-    if (allFilled && !hasReportLink) return 'Pending'
-    return 'Incomplete Information'
-  }
-
-  useEffect(() => {
-    let active = true
-    const controller = new AbortController()
-    async function loadRate() {
-      await Promise.resolve()
-      if (!active) return
-      setRateLoading(true)
-      try {
-        const currency = form.secondary_currency
-        let rate = 1
-        if (currency) {
-          const response = await fetch(`https://open.er-api.com/v6/latest/${currency}`, { signal: controller.signal })
-          const data = await response.json()
-          if (!response.ok || !data.rates?.USD) throw new Error('Exchange rate unavailable')
-          rate = data.rates.USD
-        }
-        if (active) {
-          setExchangeRate(rate)
-          exchangeRateRef.current = rate
-        }
-      } catch (error) {
-        if (active && error.name !== 'AbortError') {
-          setExchangeRate(1)
-          exchangeRateRef.current = 1
-        }
-      } finally {
-        if (active) setRateLoading(false)
-      }
-    }
-    loadRate()
-    return () => { active = false; controller.abort() }
-  }, [form.secondary_currency])
 
   function handleChange(e) {
     const { name, value } = e.target
     setForm(prev => {
-      const updated = { ...prev, [name]: value }
+      let updated = { ...prev, [name]: value }
 
-        if (name === 'chapter') {
+      if (name === 'chapter') {
         const allowed = projectTypesFor(value)
         if (!allowed.includes(updated.project_type)) {
           updated.project_type = allowed.length === 1 ? allowed[0] : ''
         }
       }
 
-      // Auto calculate Total Grant Amount USD
-      if (name === 'total_grant_amount_orig') {
-        const usd = (parseFloat(value) || 0) * exchangeRateRef.current
-        updated.total_grant_amount_usd = usd.toFixed(2)
-        // Recalculate remaining
-        const remOrig = (parseFloat(updated.total_grant_amount_orig) || 0) -
-          (parseFloat(updated.current_payment_orig) || 0)
-        updated.remaining_payment_orig = remOrig.toFixed(2)
-        const remUsd = usd - (parseFloat(updated.current_payment_usd) || 0)
-        updated.remaining_payment_usd = remUsd.toFixed(2)
-      }
-
-      // Auto calculate Current Payment USD
-      if (name === 'current_payment_orig') {
-        const usd = (parseFloat(value) || 0) * exchangeRateRef.current
-        updated.current_payment_usd = usd.toFixed(2)
-        // Recalculate remaining orig
-        const remOrig = (parseFloat(updated.total_grant_amount_orig) || 0) -
-          (parseFloat(value) || 0)
-        updated.remaining_payment_orig = remOrig.toFixed(2)
-        // Recalculate remaining usd
-        const remUsd = (parseFloat(updated.total_grant_amount_usd) || 0) - usd
-        updated.remaining_payment_usd = remUsd.toFixed(2)
-      }
-
-      // Update report status preview
-      updated.report_status = calcReportStatus(updated)
+      // USD amounts follow the original-currency amounts and the exchange rate
+      if (name === 'total_grant_amount_orig') updated = applyAmounts(updated, fx.rate, ['total'])
+      if (name === 'current_payment_orig') updated = applyAmounts(updated, fx.rate, ['current'])
+      if (name === 'secondary_currency') updated = applyAmounts(updated, value ? null : 1)
 
       return updated
     })
+    if (name === 'secondary_currency') {
+      fx.loadRate(value).then(rate => { if (rate) setForm(prev => applyAmounts(prev, rate)) })
+    }
   }
 
-async function handleSubmit() {
+  function handleRateChange(value) {
+    fx.setRate(value)
+    const rate = parseFloat(value)
+    setForm(prev => applyAmounts(prev, rate > 0 ? rate : null))
+  }
+
+  async function handleSubmit() {
+    if (rateMissing) {
+      setError(`Enter the ${form.secondary_currency} to USD exchange rate before saving.`)
+      return
+    }
     setLoading(true)
     setError('')
     try {
@@ -354,18 +284,7 @@ async function handleSubmit() {
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            ...form,
-            total_grant_amount_orig: parseFloat(form.total_grant_amount_orig) || 0,
-            total_grant_amount_usd: parseFloat(form.total_grant_amount_usd) || 0,
-            sub_grant_amount: parseFloat(form.sub_grant_amount) || 0,
-            current_payment_orig: parseFloat(form.current_payment_orig) || 0,
-            current_payment_usd: parseFloat(form.current_payment_usd) || 0,
-            remaining_payment_orig: parseFloat(form.remaining_payment_orig) || 0,
-            remaining_payment_usd: parseFloat(form.remaining_payment_usd) || 0,
-            quantity: parseFloat(form.quantity) || 0,
-            no_of_beneficiaries: parseFloat(form.no_of_beneficiaries) || 0,
-          }),
+          body: JSON.stringify(toPayload(form)),
         }
       )
       const data = await response.json()
@@ -377,7 +296,8 @@ async function handleSubmit() {
         throw new Error(typeof detail === 'string' ? detail : 'Failed to add grant')
       }
       markSaved()
-      navigate('/', { state: { notice: data.audit_warning || 'Grant saved successfully.' } })
+      uploads.commit()
+      navigate('/',{ state: { notice: data.audit_warning || 'Grant saved successfully.' } })
     } catch (err) {
       setError(err.message)
     } finally {
@@ -401,14 +321,9 @@ async function handleSubmit() {
                       flex justify-between items-center sticky top-0 z-10">
         <h1 className="text-xl font-bold text-brand-900">GrantFlow</h1>
         <div className="flex items-center gap-4">
-          {rateLoading && (
-            <span className="text-xs text-gray-400">
-              Fetching exchange rate...
-            </span>
-          )}
-          {!rateLoading && form.secondary_currency && (
+          {form.secondary_currency && fx.rate && (
             <span className="text-xs text-green-600 font-medium">
-              1 {form.secondary_currency} = {exchangeRate.toFixed(4)} USD
+              1 {form.secondary_currency} = {fx.rate.toFixed(4)} USD
             </span>
           )}
           <button
@@ -504,8 +419,9 @@ async function handleSubmit() {
 
             {/* Primary currency — always USD */}
             <div>
-              <label htmlFor={name} className={labelClass}>Primary Currency</label>
+              <label htmlFor="primary_currency" className={labelClass}>Primary Currency</label>
               <input
+                id="primary_currency"
                 type="text"
                 value="USD"
                 readOnly
@@ -522,6 +438,7 @@ async function handleSubmit() {
               {...f('secondary_currency')} label="Secondary Currency"
               options={['CAD', 'EUR', 'AED', 'AUD', 'GBP']}
             />
+            <ExchangeRateField currency={form.secondary_currency} fx={fx} onChange={handleRateChange} />
 
             <NumberField
               {...f('total_grant_amount_orig')}
@@ -568,6 +485,7 @@ async function handleSubmit() {
                 value={form.payment_reference}
                 onChange={handleChange}
                 folder="payment-references"
+                uploads={uploads}
               />
             </div>
 
@@ -725,6 +643,7 @@ async function handleSubmit() {
                 value={form.picture}
                 onChange={handleChange}
                 folder="pictures"
+                uploads={uploads}
               />
             </div>
 
@@ -755,7 +674,7 @@ async function handleSubmit() {
           <div className="mt-6 pt-4 border-t border-gray-100">
             <button
               onClick={handleSubmit}
-              disabled={loading}
+              disabled={loading || rateMissing}
               className="w-full bg-brand-700 text-white py-3 rounded-lg
                          font-medium hover:bg-brand-800 transition
                          disabled:opacity-50"

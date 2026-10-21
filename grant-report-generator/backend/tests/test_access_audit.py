@@ -48,13 +48,38 @@ class AccessAuditTests(unittest.TestCase):
 
     def test_update_records_before_after_values(self):
         self.user('editor')
-        before = dict(self.payload, supplier='Old supplier')
+        before = dict(self.payload, supplier='Old supplier', version='v1')
         with patch.object(routes, '_get_single_grant', return_value=before), patch.object(routes.supabase_service, 'start_audit', return_value='audit-id') as audit, patch.object(routes.supabase_service, 'finish_audit'), patch.object(routes, 'update_grant') as update:
-            response = self.client.put('/api/grants/TEST-1', json=self.payload)
+            response = self.client.put('/api/grants/TEST-1', json=dict(self.payload, version='v1'))
         self.assertEqual(response.status_code, 200)
         self.assertEqual(audit.call_args.kwargs['before']['supplier'], 'Old supplier')
         self.assertEqual(audit.call_args.kwargs['after']['supplier'], 'Supplier')
-        update.assert_called_once()
+        self.assertNotIn('version', audit.call_args.kwargs['after'])
+        self.assertEqual(update.call_args.kwargs['expected_version'], 'v1')
+
+    def test_stale_or_missing_version_is_refused_before_audit(self):
+        self.user('editor')
+        before = dict(self.payload, version='current')
+        with patch.object(routes, '_get_single_grant', return_value=before), patch.object(routes.supabase_service, 'start_audit') as audit, patch.object(routes, 'update_grant') as update:
+            self.assertEqual(self.client.put('/api/grants/TEST-1', json=dict(self.payload, version='old')).status_code, 409)
+            self.assertEqual(self.client.put('/api/grants/TEST-1', json=self.payload).status_code, 422)
+        audit.assert_not_called()
+        update.assert_not_called()
+
+    def test_rejected_write_is_409_and_marked_rejected(self):
+        self.user('editor')
+        with patch.object(routes, 'check_grant_number_exists', return_value=False), patch.object(routes.supabase_service, 'start_audit', return_value='audit-id'), patch.object(routes.supabase_service, 'finish_audit') as finish, patch.object(routes, 'append_grant', side_effect=routes.WriteRejectedError('already exists')):
+            response = self.client.post('/api/grants', json=self.payload)
+        self.assertEqual(response.status_code, 409)
+        finish.assert_called_once_with('audit-id', 'rejected')
+
+    def test_report_status_is_calculated_by_the_server(self):
+        self.user('editor')
+        written = {}
+        with patch.object(routes, 'check_grant_number_exists', return_value=False), patch.object(routes, '_audited_write', side_effect=lambda user, action, number, before, after, write: written.update(after)):
+            self.client.post('/api/grants', json=dict(self.payload, report_status='Complete'))
+        self.assertEqual(written['report_status'], 'Incomplete Information')
+        self.assertIsNone(written['quantity'])
 
     def test_missing_audit_database_prevents_sheet_write(self):
         self.user('editor')

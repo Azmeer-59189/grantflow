@@ -77,6 +77,28 @@ def _clean_cell(value: Any) -> str:
     return str(value).strip() if value is not None else ""
 
 
+def parse_headers(header_row: list[Any]) -> list[str]:
+    """Normalise and check the header row. Shared with the writer."""
+
+    headers = [_normalise_header(_clean_cell(cell)) for cell in header_row]
+    if not any(headers):
+        raise GoogleSheetsReadError("The Grants tab needs a non-empty header row.")
+    if any(not header for header in headers):
+        raise GoogleSheetsReadError("The Grants tab header row cannot contain blank cells.")
+    if len(headers) != len(set(headers)):
+        raise GoogleSheetsReadError(
+            "The Grants tab has duplicate headers after normalising their names."
+        )
+    return headers
+
+
+def row_record(headers: list[str], row: list[Any]) -> dict[str, str]:
+    """Map one sheet row onto the normalised headers."""
+
+    cells = [_clean_cell(cell) for cell in row]
+    return {header: cells[index] if index < len(cells) else "" for index, header in enumerate(headers)}
+
+
 def _rows_to_records(values: list[list[Any]]) -> list[dict[str, str]]:
     """Turn a header row and data rows into clean dictionaries.
 
@@ -87,25 +109,9 @@ def _rows_to_records(values: list[list[Any]]) -> list[dict[str, str]]:
     if not values:
         return []
 
-    headers = [_normalise_header(_clean_cell(cell)) for cell in values[0]]
-    if not any(headers):
-        raise GoogleSheetsReadError("The Grants tab needs a non-empty header row.")
-    if any(not header for header in headers):
-        raise GoogleSheetsReadError("The Grants tab header row cannot contain blank cells.")
-    if len(headers) != len(set(headers)):
-        raise GoogleSheetsReadError(
-            "The Grants tab has duplicate headers after normalising their names."
-        )
-
-    records: list[dict[str, str]] = []
-    for row in values[1:]:
-        cells = [_clean_cell(cell) for cell in row]
-        if not any(cells):
-            continue
-        records.append(
-            {header: cells[index] if index < len(cells) else "" for index, header in enumerate(headers)}
-        )
-    return records
+    headers = parse_headers(values[0])
+    return [row_record(headers, row) for row in values[1:]
+            if any(_clean_cell(cell) for cell in row)]
 
 
 def fetch_grant_rows(tab_name: str = DEFAULT_TAB_NAME) -> list[dict[str, str]]:

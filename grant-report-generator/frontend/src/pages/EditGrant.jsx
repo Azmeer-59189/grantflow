@@ -2,9 +2,38 @@ import GrantSections from '../components/GrantSections'
 import FormProgress from '../components/FormProgress'
 import useUnsavedChanges from '../hooks/useUnsavedChanges'
 import { apiFetch } from '../lib/api'
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import FileUploadField from '../components/FileUploadField'
+import ExchangeRateField from '../components/ExchangeRateField'
+import useExchangeRate from '../hooks/useExchangeRate'
+import useUploadCleanup from '../hooks/useUploadCleanup'
+import { applyAmounts, calcReportStatus, impliedRate, toForm, toPayload } from '../lib/grantForm'
 import { useNavigate, useParams } from 'react-router-dom'
+
+const EMPTY_FORM = {
+  year: '', country: '', chapter: '', grant_number: '', project_type: '',
+  department: '', supplier: '', item: '', po_wo_number: '',
+  sub_grant_no: '', link_to_complete_documents: '',
+  secondary_currency: '', total_grant_amount_orig: '',
+  total_grant_amount_usd: '', sub_grant_amount: '',
+  current_payment_orig: '', current_payment_usd: '',
+  remaining_payment_orig: '', remaining_payment_usd: '',
+  payment_status: 'Pending', payment_reference: '',
+  grant_receiving_date: '', grant_application_sent_date: '',
+  date_dr_zafar_signed_application: '', date_of_approval_by_khaleeq_sb: '',
+  date_of_email_to_int_chapter: '', payment_date: '',
+  date_ceo_signed_application: '', shipping_documents_status: '',
+  shipping_documents_comment: '', link_to_shipping_documents: '',
+  commercial_invoice_no: '', bill_of_lading: '',
+  packing_list_reference: '', grn_receiving_status: '',
+  receiving_date: '', grn_number: '', link_to_grn: '',
+  grn_receiving_comments: '', installation_date: '', location: '',
+  building_name: '', floor: '', room: '', item_model: '',
+  item_serial_number: '', quantity: '', ihhn_asset_tag_number: '',
+  department_for_pictures: '', picture: '', pictures_status: '',
+  no_of_beneficiaries: '', report_status: 'Incomplete Information',
+  link_to_utilization_report: '', item_description: '',
+}
 
 // ── Field components — defined OUTSIDE so they never remount ───────────────
 const inputClass = `w-full border border-gray-300 rounded-lg px-4 py-2
@@ -170,66 +199,15 @@ function EditGrant() {
   const [loading, setLoading] = useState(false)
   const [fetching, setFetching] = useState(true)
   const [error, setError] = useState('')
-  const [exchangeRate, setExchangeRate] = useState(1)
-  const [rateLoading, setRateLoading] = useState(false)
-  const exchangeRateRef = useRef(1)
-
-  const [form, setForm] = useState({
-    country: '', chapter: '', grant_number: '', project_type: '',
-    department: '', supplier: '', item: '', po_wo_number: '',
-    sub_grant_no: '', link_to_complete_documents: '',
-    secondary_currency: '', total_grant_amount_orig: '',
-    total_grant_amount_usd: '', sub_grant_amount: '',
-    current_payment_orig: '', current_payment_usd: '',
-    remaining_payment_orig: '', remaining_payment_usd: '',
-    payment_status: 'Pending', payment_reference: '',
-    grant_receiving_date: '', grant_application_sent_date: '',
-    date_dr_zafar_signed_application: '', date_of_approval_by_khaleeq_sb: '',
-    date_of_email_to_int_chapter: '', payment_date: '',
-    date_ceo_signed_application: '', shipping_documents_status: '',
-    shipping_documents_comment: '', link_to_shipping_documents: '',
-    commercial_invoice_no: '', bill_of_lading: '',
-    packing_list_reference: '', grn_receiving_status: '',
-    receiving_date: '', grn_number: '', link_to_grn: '',
-    grn_receiving_comments: '', installation_date: '', location: '',
-    building_name: '', floor: '', room: '', item_model: '',
-    item_serial_number: '', quantity: '', ihhn_asset_tag_number: '',
-    department_for_pictures: '', picture: '', pictures_status: '',
-    no_of_beneficiaries: '', report_status: 'Incomplete Information',
-    link_to_utilization_report: '', item_description: '',
-  })
+  const [form, setForm] = useState(EMPTY_FORM)
+  const [version, setVersion] = useState('')
+  const [conflict, setConflict] = useState(false)
+  const fx = useExchangeRate()
+  const { setRate, loadRate } = fx
+  const uploads = useUploadCleanup()
+  const rateMissing = Boolean(form.secondary_currency) && !fx.rate
 
   const { dirty, markSaved, setBaseline } = useUnsavedChanges(form, !fetching)
-
-  function calcReportStatus(f) {
-    const requiredFields = [
-      'country', 'chapter', 'grant_number', 'project_type', 'department',
-      'supplier', 'item', 'po_wo_number', 'sub_grant_no',
-      'link_to_complete_documents', 'secondary_currency',
-      'total_grant_amount_orig', 'total_grant_amount_usd',
-      'current_payment_orig', 'current_payment_usd',
-      'payment_status', 'payment_reference',
-      'grant_receiving_date', 'grant_application_sent_date',
-      'date_dr_zafar_signed_application', 'date_of_approval_by_khaleeq_sb',
-      'date_of_email_to_int_chapter', 'payment_date',
-      'date_ceo_signed_application',
-      'shipping_documents_status', 'shipping_documents_comment',
-      'link_to_shipping_documents', 'commercial_invoice_no',
-      'bill_of_lading', 'packing_list_reference',
-      'grn_receiving_status', 'receiving_date', 'grn_number',
-      'link_to_grn', 'grn_receiving_comments', 'installation_date',
-      'location', 'building_name', 'floor', 'room',
-      'item_model', 'item_serial_number', 'quantity',
-      'ihhn_asset_tag_number', 'department_for_pictures',
-      'picture', 'pictures_status', 'no_of_beneficiaries',
-      'item_description',
-    ]
-    const allFilled = requiredFields.every(k => String(f[k] || '').trim())
-    const hasReportLink = String(f.link_to_utilization_report || '').trim()
-    if (allFilled && hasReportLink) return 'Complete'
-    if (allFilled && !hasReportLink) return 'Pending'
-    return 'Incomplete Information'
-  }
 
   useEffect(() => {
     let active = true
@@ -242,65 +220,15 @@ function EditGrant() {
       if (!response.ok) throw new Error(data.detail || 'Grant not found')
 
       if (!active) return
-      const loaded = {
-        year: data.year || '',
-        country: data.country || '',
-        chapter: data.chapter || '',
-        grant_number: data.grant_number || '',
-        project_type: data.project_type || '',
-        department: data.department || '',
-        supplier: data.supplier || '',
-        item: data.item || '',
-        po_wo_number: data.po_wo_number || '',
-        sub_grant_no: data.sub_grant_no || '',
-        link_to_complete_documents: data.link_to_complete_documents || '',
-        secondary_currency: data.secondary_currency || '',
-        total_grant_amount_orig: data.total_grant_amount_orig || '',
-        total_grant_amount_usd: data.total_grant_amount_usd || '',
-        sub_grant_amount: data.sub_grant_amount || '',
-        current_payment_orig: data.current_payment_orig || '',
-        current_payment_usd: data.current_payment_usd || '',
-        remaining_payment_orig: data.remaining_payment_orig || '',
-        remaining_payment_usd: data.remaining_payment_usd || '',
-        payment_status: data.payment_status || 'Pending',
-        payment_reference: data.payment_reference || '',
-        grant_receiving_date: data.grant_receiving_date || '',
-        grant_application_sent_date: data.grant_application_sent_date || '',
-        date_dr_zafar_signed_application: data.date_dr_zafar_signed_application || '',
-        date_of_approval_by_khaleeq_sb: data.date_of_approval_by_khaleeq_sb || '',
-        date_of_email_to_int_chapter: data.date_of_email_to_int_chapter || '',
-        payment_date: data.payment_date || '',
-        date_ceo_signed_application: data.date_ceo_signed_application || '',
-        shipping_documents_status: data.shipping_documents_status || '',
-        shipping_documents_comment: data.shipping_documents_comment || '',
-        link_to_shipping_documents: data.link_to_shipping_documents || '',
-        commercial_invoice_no: data.commercial_invoice_no || '',
-        bill_of_lading: data.bill_of_lading || '',
-        packing_list_reference: data.packing_list_reference || '',
-        grn_receiving_status: data.grn_receiving_status || '',
-        receiving_date: data.receiving_date || '',
-        grn_number: data.grn_number || '',
-        link_to_grn: data.link_to_grn || '',
-        grn_receiving_comments: data.grn_receiving_comments || '',
-        installation_date: data.installation_date || '',
-        location: data.location || '',
-        building_name: data.building_name || '',
-        floor: data.floor || '',
-        room: data.room || '',
-        item_model: data.item_model || '',
-        item_serial_number: data.item_serial_number || '',
-        quantity: data.quantity || '',
-        ihhn_asset_tag_number: data.ihhn_asset_tag_number || '',
-        department_for_pictures: data.department_for_pictures || '',
-        picture: data.picture || '',
-        pictures_status: data.pictures_status || '',
-        no_of_beneficiaries: data.no_of_beneficiaries || '',
-        report_status: data.report_status || 'Incomplete Information',
-        link_to_utilization_report: data.link_to_utilization_report || '',
-        item_description: data.item_description || '',
-      }
+      const loaded = toForm(data, EMPTY_FORM)
       setForm(loaded)
       setBaseline(loaded)
+      setVersion(data.version || '')
+      // Keep the rate the saved amounts were converted at; only look one up
+      // when there is nothing saved to derive it from.
+      const saved = loaded.secondary_currency ? impliedRate(loaded) : 1
+      if (saved) setRate(saved, loaded.secondary_currency ? 'saved' : 'usd')
+      else loadRate(loaded.secondary_currency)
 
     } catch (err) {
       if (active) setError(err.message)
@@ -310,97 +238,51 @@ function EditGrant() {
   }
     fetchGrant()
     return () => { active = false }
-  }, [grantNumber, setBaseline])
-
-  useEffect(() => {
-    let active = true
-    const controller = new AbortController()
-    async function loadRate() {
-      await Promise.resolve()
-      if (!active) return
-      setRateLoading(true)
-      try {
-        const currency = form.secondary_currency
-        let rate = 1
-        if (currency) {
-          const response = await fetch(`https://open.er-api.com/v6/latest/${currency}`, { signal: controller.signal })
-          const data = await response.json()
-          if (!response.ok || !data.rates?.USD) throw new Error('Exchange rate unavailable')
-          rate = data.rates.USD
-        }
-        if (active) {
-          setExchangeRate(rate)
-          exchangeRateRef.current = rate
-        }
-      } catch (error) {
-        if (active && error.name !== 'AbortError') {
-          setExchangeRate(1)
-          exchangeRateRef.current = 1
-        }
-      } finally {
-        if (active) setRateLoading(false)
-      }
-    }
-    loadRate()
-    return () => { active = false; controller.abort() }
-  }, [form.secondary_currency])
+  }, [grantNumber, setBaseline, setRate, loadRate])
 
   function handleChange(e) {
     const { name, value } = e.target
     setForm(prev => {
-      const updated = { ...prev, [name]: value }
-
-      if (name === 'total_grant_amount_orig') {
-        const usd = (parseFloat(value) || 0) * exchangeRateRef.current
-        updated.total_grant_amount_usd = usd.toFixed(2)
-        const remOrig = (parseFloat(value) || 0) -
-          (parseFloat(updated.current_payment_orig) || 0)
-        updated.remaining_payment_orig = remOrig.toFixed(2)
-        const remUsd = usd - (parseFloat(updated.current_payment_usd) || 0)
-        updated.remaining_payment_usd = remUsd.toFixed(2)
-      }
-
-      if (name === 'current_payment_orig') {
-        const usd = (parseFloat(value) || 0) * exchangeRateRef.current
-        updated.current_payment_usd = usd.toFixed(2)
-        const remOrig = (parseFloat(updated.total_grant_amount_orig) || 0) -
-          (parseFloat(value) || 0)
-        updated.remaining_payment_orig = remOrig.toFixed(2)
-        const remUsd = (parseFloat(updated.total_grant_amount_usd) || 0) - usd
-        updated.remaining_payment_usd = remUsd.toFixed(2)
-      }
-
-      updated.report_status = calcReportStatus(updated)
+      let updated = { ...prev, [name]: value }
+      // USD amounts follow the original-currency amounts and the exchange rate
+      if (name === 'total_grant_amount_orig') updated = applyAmounts(updated, fx.rate, ['total'])
+      if (name === 'current_payment_orig') updated = applyAmounts(updated, fx.rate, ['current'])
+      if (name === 'secondary_currency') updated = applyAmounts(updated, value ? null : 1)
       return updated
     })
+    if (name === 'secondary_currency') {
+      fx.loadRate(value).then(rate => { if (rate) setForm(prev => applyAmounts(prev, rate)) })
+    }
+  }
+
+  function handleRateChange(value) {
+    fx.setRate(value)
+    const rate = parseFloat(value)
+    setForm(prev => applyAmounts(prev, rate > 0 ? rate : null))
   }
 
   async function handleSubmit() {
+    if (rateMissing) {
+      setError(`Enter the ${form.secondary_currency} to USD exchange rate before saving.`)
+      return
+    }
     setLoading(true)
     setError('')
+    setConflict(false)
     try {
       const response = await apiFetch(
         `${import.meta.env.VITE_API_URL}/api/grants/${encodeURIComponent(grantNumber)}`,
         {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            ...form,
-            total_grant_amount_orig: parseFloat(form.total_grant_amount_orig) || 0,
-            total_grant_amount_usd: parseFloat(form.total_grant_amount_usd) || 0,
-            sub_grant_amount: parseFloat(form.sub_grant_amount) || 0,
-            current_payment_orig: parseFloat(form.current_payment_orig) || 0,
-            current_payment_usd: parseFloat(form.current_payment_usd) || 0,
-            remaining_payment_orig: parseFloat(form.remaining_payment_orig) || 0,
-            remaining_payment_usd: parseFloat(form.remaining_payment_usd) || 0,
-            quantity: parseFloat(form.quantity) || 0,
-            no_of_beneficiaries: parseFloat(form.no_of_beneficiaries) || 0,
-          }),
+          body: JSON.stringify({ ...toPayload(form), version }),
         }
       )
       const data = await response.json()
-      if (!response.ok) throw new Error(data.detail || 'Failed to update grant')
+      if (response.status === 409) setConflict(true)
+      if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Failed to update grant')
       markSaved()
+      uploads.commit()
       navigate('/', { state: { notice: data.audit_warning || 'Grant saved successfully.' } })
     } catch (err) {
       setError(err.message)
@@ -433,14 +315,9 @@ function EditGrant() {
                       flex justify-between items-center sticky top-0 z-10">
         <h1 className="text-xl font-bold text-brand-900">GrantFlow</h1>
         <div className="flex items-center gap-4">
-          {rateLoading && (
-            <span className="text-xs text-gray-400">
-              Fetching exchange rate...
-            </span>
-          )}
-          {!rateLoading && form.secondary_currency && (
+          {form.secondary_currency && fx.rate && (
             <span className="text-xs text-green-600 font-medium">
-              1 {form.secondary_currency} = {exchangeRate.toFixed(4)} USD
+              1 {form.secondary_currency} = {fx.rate.toFixed(4)} USD
             </span>
           )}
           <button
@@ -469,8 +346,16 @@ function EditGrant() {
         </div>
 
         {error && (
-          <div className="bg-red-50 text-red-600 text-sm p-3 rounded-lg mb-4">
+          <div role="alert" className="bg-red-50 text-red-600 text-sm p-3 rounded-lg mb-4">
             {error}
+            {conflict && (
+              <p className="mt-2 text-slate-700">
+                Your edits are still on this page. Note anything you need, then{' '}
+                <button type="button" onClick={() => window.location.reload()} className="font-semibold text-brand-700 underline">
+                  load the latest version
+                </button>.
+              </p>
+            )}
           </div>
         )}
 
@@ -534,8 +419,9 @@ function EditGrant() {
             <SectionHeader sectionMarker title="Financial Details" />
 
             <div>
-              <label htmlFor={name} className={labelClass}>Primary Currency</label>
+              <label htmlFor="primary_currency" className={labelClass}>Primary Currency</label>
               <input
+                id="primary_currency"
                 type="text"
                 value="USD"
                 readOnly
@@ -550,6 +436,7 @@ function EditGrant() {
               {...f('secondary_currency')} label="Secondary Currency"
               options={['CAD', 'EUR', 'AED', 'AUD', 'GBP']}
             />
+            <ExchangeRateField currency={form.secondary_currency} fx={fx} onChange={handleRateChange} />
             <NumberField
               {...f('total_grant_amount_orig')}
               label={`Total Grant Amount ${form.secondary_currency ? `(${form.secondary_currency})` : '(orig)'}`}
@@ -591,6 +478,7 @@ function EditGrant() {
                 value={form.payment_reference}
                 onChange={handleChange}
                 folder="payment-references"
+                uploads={uploads}
               />
             </div>
 
@@ -748,6 +636,7 @@ function EditGrant() {
                 value={form.picture}
                 onChange={handleChange}
                 folder="pictures"
+                uploads={uploads}
               />
             </div>
 
@@ -778,7 +667,7 @@ function EditGrant() {
           <div className="mt-6 pt-4 border-t border-gray-100">
             <button
               onClick={handleSubmit}
-              disabled={loading}
+              disabled={loading || rateMissing}
               className="w-full bg-brand-700 text-white py-3 rounded-lg
                          font-medium hover:bg-brand-800 transition
                          disabled:opacity-50"

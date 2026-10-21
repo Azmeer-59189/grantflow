@@ -54,15 +54,40 @@ class RegressionTests(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             auth.return_value.auth.get_user.assert_called_once_with('verified')
 
-    def test_invalid_numeric_row_is_visible(self):
+    def test_invalid_numeric_cell_is_reported_without_hiding_other_grants(self):
         self.sign_in()
         invalid = dict(self.grant, current_payment_usd='12.3.4')
-        with patch.object(routes, 'fetch_grant_rows', return_value=[invalid]):
+        valid = dict(self.grant, grant_number='DEMO-2')
+        with patch.object(routes, 'fetch_grant_rows', return_value=[invalid, valid]), patch.object(routes.supabase_service, 'cache_sheet_data'):
             response = self.client.get('/api/grants')
-        self.assertEqual(response.status_code, 422)
-        self.assertIn('Row 2', response.json()['detail'])
-        with self.assertRaises(GrantDataValidationError):
-            process_grant_rows([dict(self.grant, current_payment_usd='invalid')])
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual([g['grant_number'] for g in body['grants']], ['DEMO-1', 'DEMO-2'])
+        self.assertIsNone(body['grants'][0]['current_payment_usd'])
+        self.assertEqual(len(body['row_errors']), 1)
+        self.assertIn('Row 2 (DEMO-1)', body['row_errors'][0])
+
+    def test_duplicate_grant_numbers_are_reported(self):
+        summary = process_grant_rows([self.grant, dict(self.grant, supplier='Other')])
+        self.assertEqual(len(summary.grants), 1)
+        self.assertEqual(summary.grants[0].supplier, 'Supplier')
+        self.assertIn('already appears in row 2', summary.row_errors[0])
+
+    def test_blank_and_zero_numbers_do_not_count_as_filled(self):
+        from services.data_processor import REQUIRED_FOR_STATUS, calculate_report_status
+        full = {field: 'x' for field in REQUIRED_FOR_STATUS}
+        full.update(total_grant_amount_orig='10', total_grant_amount_usd='10', quantity='1',
+                    no_of_beneficiaries='5', remaining_payment_usd='0', remaining_payment_orig='0')
+        self.assertEqual(calculate_report_status(full), 'Pending')
+        self.assertEqual(calculate_report_status(dict(full, quantity='0')), 'Incomplete Information')
+        self.assertEqual(calculate_report_status(dict(full, quantity=None)), 'Incomplete Information')
+        self.assertEqual(calculate_report_status(dict(full, link_to_utilization_report='https://x')), 'Complete')
+        self.assertIsNone(process_grant_rows([dict(self.grant, quantity='')]).grants[0].quantity)
+
+    def test_version_changes_when_the_row_changes(self):
+        first = process_grant_rows([self.grant]).grants[0].version
+        self.assertEqual(first, process_grant_rows([dict(self.grant)]).grants[0].version)
+        self.assertNotEqual(first, process_grant_rows([dict(self.grant, item='Valve')]).grants[0].version)
 
     def test_recent_fallback_is_labeled_and_expired_cache_rejected(self):
         self.sign_in()
@@ -91,8 +116,9 @@ class RegressionTests(unittest.TestCase):
             summary = process_grant_rows([dict(self.grant, current_payment_usd=value)])
             self.assertEqual(summary.grants[0].current_payment_usd, expected)
         for value in ['NaN', 'inf', 'USD nonsense', '1e309']:
-            with self.assertRaises(GrantDataValidationError):
-                process_grant_rows([dict(self.grant, current_payment_usd=value)])
+            summary = process_grant_rows([dict(self.grant, current_payment_usd=value)])
+            self.assertIsNone(summary.grants[0].current_payment_usd)
+            self.assertEqual(len(summary.row_errors), 1)
 
     def test_all_chapter_templates_generate_valid_word_documents(self):
         with tempfile.TemporaryDirectory() as directory:

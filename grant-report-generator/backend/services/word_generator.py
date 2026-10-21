@@ -131,11 +131,11 @@ def create_word_report(grant: dict, output_path: Path, sections: dict | None = N
         for field in fields.split():
             value = grant.get(field)
             if value is None or value == '':
-                value = '?'
+                value = '—'
             elif isinstance(value, (int, float)):
                 value = f'{value:,.2f}'
             rows.append((field.replace('_', ' ').title(), value))
         _add_detail_table(document, rows)
-    document.add_paragraph('Confidential ? For internal use only.')
+    document.add_paragraph('Confidential — For internal use only.')
     document.save(output_path)
     return output_path

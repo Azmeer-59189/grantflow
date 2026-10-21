@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field, ConfigDict
 from services.data_processor import (
     GrantDataValidationError,
     GrantSummary,
+    calculate_report_status,
     process_grant_rows,
     validate_grant_dict,
 )
@@ -31,6 +32,7 @@ from services.sheets_reader import (
 )
 from services.sheets_writer import (
     GoogleSheetsWriteError,
+    WriteRejectedError,
     append_grant,
     check_grant_number_exists,
     update_grant,
@@ -74,6 +76,13 @@ def _audited_write(user, action, grant_number, before, after, write):
         raise HTTPException(503, 'Could not record the change. No grant was written.') from error
     try:
         write()
+    except WriteRejectedError as error:
+        # Refused before anything reached the Sheet (duplicate, conflict, layout).
+        try:
+            supabase_service.finish_audit(audit_id, 'rejected')
+        except Exception:
+            logging.exception('Could not update audit status')
+        raise HTTPException(409, str(error)) from error
     except Exception as error:
         # Network failures can happen after Google has accepted a write.
         # Keep the intent for reconciliation rather than claiming rollback.
@@ -112,13 +121,13 @@ class GrantPayload(BaseModel):
     sub_grant_no: Optional[str] = ""
     link_to_complete_documents: Optional[str] = ""
     secondary_currency: Optional[str] = ""
-    total_grant_amount_orig: Optional[float] = 0.0
-    total_grant_amount_usd: Optional[float] = 0.0
-    sub_grant_amount: Optional[float] = 0.0
-    current_payment_orig: Optional[float] = 0.0
-    current_payment_usd: Optional[float] = 0.0
-    remaining_payment_orig: Optional[float] = 0.0
-    remaining_payment_usd: Optional[float] = 0.0
+    total_grant_amount_orig: Optional[float] = None
+    total_grant_amount_usd: Optional[float] = None
+    sub_grant_amount: Optional[float] = None
+    current_payment_orig: Optional[float] = None
+    current_payment_usd: Optional[float] = None
+    remaining_payment_orig: Optional[float] = None
+    remaining_payment_usd: Optional[float] = None
     payment_status: str = "Pending"
     payment_reference: Optional[str] = ""
     grant_receiving_date: Optional[str] = ""
@@ -146,15 +155,17 @@ class GrantPayload(BaseModel):
     room: Optional[str] = ""
     item_model: Optional[str] = ""
     item_serial_number: Optional[str] = ""
-    quantity: Optional[float] = 0.0
+    quantity: Optional[float] = None
     ihhn_asset_tag_number: Optional[str] = ""
     department_for_pictures: Optional[str] = ""
     picture: Optional[str] = ""
     pictures_status: Optional[str] = ""
-    no_of_beneficiaries: Optional[float] = 0.0
+    no_of_beneficiaries: Optional[float] = None
     report_status: Optional[str] = "Incomplete Information"
     link_to_utilization_report: Optional[str] = ""
     item_description: Optional[str] = ""
+    # Row fingerprint from GET; required when editing so stale saves are refused.
+    version: Optional[str] = None
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
@@ -217,12 +228,13 @@ def get_grant(grant_number: str) -> dict:
 @router.post("/grants", status_code=201)
 def add_grant(payload: GrantPayload, user=Depends(require_editor)) -> dict:
     """Add a new grant row to the Google Sheet."""
-    grant_data = payload.model_dump()
+    grant_data = payload.model_dump(exclude={'version'})
 
     try:
         validate_grant_dict(grant_data, is_new=True)
     except GrantDataValidationError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
+    grant_data['report_status'] = calculate_report_status(grant_data)
 
     try:
         if check_grant_number_exists(grant_data["grant_number"]):
@@ -230,6 +242,8 @@ def add_grant(payload: GrantPayload, user=Depends(require_editor)) -> dict:
                 status_code=409,
                 detail=f"Grant number '{grant_data['grant_number']}' already exists."
             )
+    except WriteRejectedError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
     except (GoogleSheetsWriteError, WriteConfigurationError) as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
 
@@ -247,18 +261,25 @@ def add_grant(payload: GrantPayload, user=Depends(require_editor)) -> dict:
 @router.put("/grants/{grant_number}")
 def edit_grant(grant_number: str, payload: GrantPayload, user=Depends(require_editor)) -> dict:
     """Update an existing grant row in the Google Sheet."""
-    grant_data = payload.model_dump()
+    grant_data = payload.model_dump(exclude={'version'})
     if grant_data['grant_number'] != grant_number:
         raise HTTPException(422, 'Grant number cannot be changed when editing a grant.')
+    if not payload.version:
+        raise HTTPException(422, 'This page is out of date. Reload the grant before saving.')
 
     try:
         validate_grant_dict(grant_data, is_new=False)
     except GrantDataValidationError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
+    grant_data['report_status'] = calculate_report_status(grant_data)
 
     before = _get_single_grant(grant_number)
+    if before.get('version') != payload.version:
+        raise HTTPException(409, 'Someone else changed this grant after you opened it. '
+                                 'Reload to see their changes, then apply yours again.')
     warning = _audited_write(user, 'update', grant_number, before, grant_data,
-                             lambda: update_grant(grant_number, grant_data))
+                             lambda: update_grant(grant_number, grant_data,
+                                                  expected_version=payload.version))
 
     return {
         "message": "Grant updated successfully.",
@@ -298,8 +319,8 @@ def _download_report(grant_number, payload, report_format, user):
             create_word_report(grant, output, sections=sections)
         supabase_service.save_report_metadata(
             generated_by=str(user.id), report_format='PDF' if report_format == 'pdf' else 'Word',
-            row_count=1, total_received=grant.get('current_payment_usd', 0),
-            total_beneficiaries=int(grant.get('no_of_beneficiaries', 0)),
+            row_count=1, total_received=grant.get('current_payment_usd') or 0,
+            total_beneficiaries=int(grant.get('no_of_beneficiaries') or 0),
         )
     except Exception as error:
         shutil.rmtree(directory, ignore_errors=True)
