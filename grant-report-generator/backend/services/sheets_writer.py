@@ -18,6 +18,7 @@ from services.data_processor import row_version
 from services.sheets_reader import (
     GoogleSheetsReadError,
     _normalise_header,
+    invalidate_cache,
     parse_headers,
     row_record,
 )
@@ -186,6 +187,8 @@ def append_grant(grant: dict, tab_name: str = DEFAULT_TAB_NAME) -> None:
         ).execute()
     except HttpError as error:
         raise GoogleSheetsWriteError(f"Could not append grant to sheet: {error}") from error
+    finally:
+        invalidate_cache()
 
 
 def update_grant(
@@ -237,6 +240,8 @@ def update_grant(
         ).execute()
     except HttpError as error:
         raise GoogleSheetsWriteError(f"Could not update grant in sheet: {error}") from error
+    finally:
+        invalidate_cache()
 
 
 def check_grant_number_exists(grant_number: str, tab_name: str = DEFAULT_TAB_NAME) -> bool:

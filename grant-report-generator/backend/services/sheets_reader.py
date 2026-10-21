@@ -9,6 +9,8 @@ in the root ``.env`` file. Never commit either secret.
 import json
 import os
 import re
+import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -114,12 +116,58 @@ def _rows_to_records(values: list[list[Any]]) -> list[dict[str, str]]:
             if any(_clean_cell(cell) for cell in row)]
 
 
-def fetch_grant_rows(tab_name: str = DEFAULT_TAB_NAME) -> list[dict[str, str]]:
-    """Fetch all populated rows from the Google Sheet's Grants tab.
+# ── Short in-memory cache ───────────────────────────────────────────────────
+# Every page load, edit and report used to read the whole Sheet. Reads within
+# SHEET_READ_CACHE_SECONDS reuse the last result; every write clears it, so
+# GrantFlow's own changes show immediately. Edits made directly in Google
+# Sheets appear after at most this many seconds. Duplicate and edit-conflict
+# checks never use this cache (sheets_writer always reads the live Sheet).
+_cache: dict[str, tuple[float, list[dict[str, str]]]] = {}
+_cache_lock = threading.Lock()
+_generation = 0  # bumped on every invalidation
 
-    The future API route will cache successful reads through ``supabase_service``
-    and can fall back to that cache if Google Sheets is unavailable.
+
+def _cache_seconds() -> float:
+    try:
+        return max(0.0, float(os.getenv("SHEET_READ_CACHE_SECONDS", "30")))
+    except ValueError:
+        return 30.0
+
+
+def invalidate_cache() -> None:
+    """Forget cached rows; call after anything may have changed the Sheet."""
+    global _generation
+    with _cache_lock:
+        _cache.clear()
+        _generation += 1
+
+
+def fetch_grant_rows_with_source(tab_name: str = DEFAULT_TAB_NAME) -> tuple[list[dict[str, str]], bool]:
+    """Return ``(rows, fresh)``; ``fresh`` is False when served from the cache.
+
+    The returned rows are shared with the cache: read them, never modify them.
     """
+    now = time.monotonic()
+    with _cache_lock:
+        cached = _cache.get(tab_name)
+        if cached and now - cached[0] < _cache_seconds():
+            return cached[1], False
+        generation = _generation
+    rows = _read_rows(tab_name)
+    with _cache_lock:
+        # A write during this read may have made these rows stale; don't keep them.
+        if generation == _generation:
+            _cache[tab_name] = (now, rows)
+    return rows, True
+
+
+def fetch_grant_rows(tab_name: str = DEFAULT_TAB_NAME) -> list[dict[str, str]]:
+    """Fetch all populated rows from the Grants tab (briefly cached)."""
+    return fetch_grant_rows_with_source(tab_name)[0]
+
+
+def _read_rows(tab_name: str) -> list[dict[str, str]]:
+    """Read all populated rows from the Google Sheet, bypassing the cache."""
 
     sheet_id = os.getenv("GOOGLE_SHEET_ID")
     if not sheet_id:

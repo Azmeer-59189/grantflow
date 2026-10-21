@@ -1,2 +1,3 @@
 -r requirements.txt
-httpx
+# FastAPI's TestClient
+httpx==0.28.1

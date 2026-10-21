@@ -6,6 +6,8 @@ and never import this module into the React frontend.
 
 import logging
 import os
+import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -41,15 +43,28 @@ def get_supabase_client() -> Client:
     return create_client(supabase_url, service_key)
 
 
-def cache_sheet_data(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    """Save one fresh Google Sheet result for use if Sheets is unavailable later."""
+# Fallback snapshots: at most one per interval, kept for a limited time, so the
+# table stays small. The fallback only uses snapshots up to
+# SHEET_CACHE_MAX_AGE_SECONDS old (one day by default).
+SNAPSHOT_INTERVAL_SECONDS = 600
+SNAPSHOT_RETENTION = timedelta(days=2)
+_last_snapshot = 0.0
 
-    response = (
-        get_supabase_client()
-        .table("sheet_cache")
-        .insert({"data": rows, "row_count": len(rows)})
-        .execute()
-    )
+
+def cache_sheet_data(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Save a fresh Google Sheet result for use if Sheets is unavailable later.
+
+    Returns None when a snapshot was saved recently enough to skip this one.
+    """
+    global _last_snapshot
+    now = time.monotonic()
+    if _last_snapshot and now - _last_snapshot < SNAPSHOT_INTERVAL_SECONDS:
+        return None
+    client = get_supabase_client()
+    response = client.table("sheet_cache").insert({"data": rows, "row_count": len(rows)}).execute()
+    _last_snapshot = now
+    cutoff = (datetime.now(timezone.utc) - SNAPSHOT_RETENTION).isoformat()
+    client.table("sheet_cache").delete().lt("cached_at", cutoff).execute()
     return response.data[0]
 
 

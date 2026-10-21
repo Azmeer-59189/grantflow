@@ -48,7 +48,7 @@ class RegressionTests(unittest.TestCase):
             self.assertEqual(self.client.get('/api/grants', headers={'Authorization': 'Bearer invalid'}).status_code, 401)
 
     def test_verified_token_can_read_grants(self):
-        with patch('api.auth._auth_client') as auth, patch.object(routes, 'fetch_grant_rows', return_value=[]), patch.object(routes.supabase_service, 'cache_sheet_data'):
+        with patch('api.auth._auth_client') as auth, patch.object(routes, 'fetch_grant_rows_with_source', return_value=([], True)), patch.object(routes.supabase_service, 'cache_sheet_data'):
             auth.return_value.auth.get_user.return_value = SimpleNamespace(user=SimpleNamespace(id='user'))
             response = self.client.get('/api/grants', headers={'Authorization': 'Bearer verified'})
             self.assertEqual(response.status_code, 200)
@@ -58,7 +58,7 @@ class RegressionTests(unittest.TestCase):
         self.sign_in()
         invalid = dict(self.grant, current_payment_usd='12.3.4')
         valid = dict(self.grant, grant_number='DEMO-2')
-        with patch.object(routes, 'fetch_grant_rows', return_value=[invalid, valid]), patch.object(routes.supabase_service, 'cache_sheet_data'):
+        with patch.object(routes, 'fetch_grant_rows_with_source', return_value=([invalid, valid], True)), patch.object(routes.supabase_service, 'cache_sheet_data'):
             response = self.client.get('/api/grants')
         self.assertEqual(response.status_code, 200)
         body = response.json()
@@ -122,7 +122,7 @@ class RegressionTests(unittest.TestCase):
         self.sign_in()
         for hours, expected in [(1, 200), (48, 503)]:
             cached = {'cached_at': (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat(), 'data': [self.grant]}
-            with patch.object(routes, 'fetch_grant_rows', side_effect=GoogleSheetsReadError('offline')), patch.object(routes.supabase_service, 'get_latest_sheet_cache', return_value=cached):
+            with patch.object(routes, 'fetch_grant_rows_with_source', side_effect=GoogleSheetsReadError('offline')), patch.object(routes.supabase_service, 'get_latest_sheet_cache', return_value=cached):
                 response = self.client.get('/api/grants')
             self.assertEqual(response.status_code, expected)
             if expected == 200:

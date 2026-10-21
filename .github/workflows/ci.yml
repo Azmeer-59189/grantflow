@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A newer push to the same branch cancels the older run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: grant-report-generator/backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'   # same as the Dockerfile
+          cache: pip
+          cache-dependency-path: grant-report-generator/backend/requirements*.txt
+      - run: pip install -r requirements-dev.txt
+      # Offline tests: Google Sheets and Supabase are replaced with fakes.
+      - run: python -m unittest discover -s tests -v
+
+  frontend:
+    name: Frontend lint, tests, build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: grant-report-generator/frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: grant-report-generator/frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+        env:
+          VITE_SUPABASE_URL: https://example.supabase.co
+          VITE_SUPABASE_ANON_KEY: ci-placeholder
+          VITE_API_URL: http://localhost:8000

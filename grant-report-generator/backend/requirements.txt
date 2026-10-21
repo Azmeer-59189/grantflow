@@ -1,24 +1,21 @@
+# Pinned so every deploy installs exactly what was tested.
+# To upgrade: change a version, run the tests (CI does this on every push).
+
 # Web API framework and local development server.
-fastapi
-uvicorn[standard]
+fastapi==0.156.7
+uvicorn[standard]==0.54.0
 
-# Read environment variables safely from the local .env file.
-python-dotenv
-pydantic-settings
+# Read environment variables from the local .env file.
+python-dotenv==1.2.4
 
-# Supabase database and authentication client.
-supabase
+# Supabase database, storage and authentication client.
+supabase==2.33.0
 
 # Google Sheets service-account connection.
-google-api-python-client
-google-auth
+google-api-python-client==2.201.0
+google-auth==2.62.0
 
-# Fixed-format report generators.
-reportlab
-python-docx
-
-# Verify Supabase JWT access tokens in the FastAPI backend.
-PyJWT[crypto]
-
-docxtpl
-docx2pdf
+# Report generators: generic PDF/Word and chapter Word templates.
+reportlab==5.0.1
+python-docx==1.2.0
+docxtpl==0.20.2

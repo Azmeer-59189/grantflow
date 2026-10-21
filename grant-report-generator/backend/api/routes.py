@@ -29,6 +29,7 @@ from services.sheets_reader import (
     GoogleSheetsConfigurationError,
     GoogleSheetsReadError,
     fetch_grant_rows,
+    fetch_grant_rows_with_source,
 )
 from services.sheets_writer import (
     GoogleSheetsWriteError,
@@ -196,7 +197,7 @@ def _get_single_grant(grant_number: str) -> dict:
 def get_grants() -> dict:
     """Return all grants and dashboard KPIs."""
     try:
-        rows = fetch_grant_rows()
+        rows, fresh = fetch_grant_rows_with_source()
         result = process_grant_rows(rows).as_dict()
     except GrantDataValidationError as error:
         raise HTTPException(422, str(error)) from error
@@ -212,10 +213,12 @@ def get_grants() -> dict:
             return result
         except Exception:
             raise HTTPException(503, 'Google Sheets is unavailable and no recent valid snapshot is available.') from error
-    try:
-        supabase_service.cache_sheet_data(rows)
-    except Exception:
-        logging.exception('Could not save sheet snapshot')
+    # Only data just read from Google is worth a fallback snapshot.
+    if fresh:
+        try:
+            supabase_service.cache_sheet_data(rows)
+        except Exception:
+            logging.exception('Could not save sheet snapshot')
     return result
 
 
