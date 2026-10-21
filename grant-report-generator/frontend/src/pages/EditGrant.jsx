@@ -5,13 +5,13 @@ import { useNavigate, useParams } from 'react-router-dom'
 
 // ── Field components — defined OUTSIDE so they never remount ───────────────
 const inputClass = `w-full border border-gray-300 rounded-lg px-4 py-2
-  text-sm focus:outline-none focus:ring-2 focus:ring-blue-500`
+  text-sm focus:outline-none focus:ring-2 focus:ring-brand-500`
 const labelClass = `block text-sm font-medium text-gray-700 mb-1`
 
 function SectionHeader({ title }) {
   return (
-    <div className="col-span-2 border-t border-gray-200 pt-4 mt-2">
-      <h3 className="text-sm font-bold text-blue-900 uppercase tracking-wider">
+    <div className="col-span-full border-t border-slate-100 pt-7 mt-3">
+      <h3 className="text-xs font-semibold text-brand-700 uppercase tracking-[0.14em]">
         {title}
       </h3>
     </div>
@@ -44,7 +44,7 @@ function NumberField({ name, label, readOnly, hint, value, onChange }) {
   return (
     <div>
       <label className={labelClass}>{label}</label>
-      {hint && <p className="text-xs text-blue-500 mb-1">{hint}</p>}
+      {hint && <p className="text-xs text-brand-500 mb-1">{hint}</p>}
       <input
         type="number"
         name={name}
@@ -113,8 +113,8 @@ function LinkField({ name, label, value, onChange }) {
             href={value}
             target="_blank"
             rel="noreferrer"
-            className="flex-shrink-0 bg-blue-700 text-white text-xs
-                       px-3 py-2 rounded-lg hover:bg-blue-800 transition
+            className="flex-shrink-0 bg-brand-700 text-white text-xs
+                       px-3 py-2 rounded-lg hover:bg-brand-800 transition
                        flex items-center"
           >
             Open
@@ -142,7 +142,7 @@ function TextareaField({ name, label, value, onChange }) {
 
 function StatusBadge({ status }) {
   const colors = {
-    'Complete': 'bg-blue-100 text-blue-700',
+    'Complete': 'bg-brand-100 text-brand-700',
     'Pending': 'bg-amber-100 text-amber-700',
     'Incomplete Information': 'bg-red-100 text-red-700',
   }
@@ -405,19 +405,19 @@ function EditGrant() {
 
   if (fetching) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="min-h-screen bg-canvas flex items-center justify-center">
         <p className="text-gray-400">Loading grant data...</p>
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-canvas">
 
       {/* Navbar */}
       <nav className="bg-white border-b border-gray-200 px-6 py-4
                       flex justify-between items-center sticky top-0 z-10">
-        <h1 className="text-xl font-bold text-blue-900">GrantFlow</h1>
+        <h1 className="text-xl font-bold text-brand-900">GrantFlow</h1>
         <div className="flex items-center gap-4">
           {rateLoading && (
             <span className="text-xs text-gray-400">
@@ -438,12 +438,12 @@ function EditGrant() {
         </div>
       </nav>
 
-      <div className="max-w-4xl mx-auto px-6 py-8">
-        <div className="flex justify-between items-center mb-6">
+      <div className="max-w-5xl mx-auto px-4 sm:px-6 py-10">
+        <div className="flex flex-wrap justify-between items-center gap-4 mb-8">
           <div>
-            <h2 className="text-2xl font-bold text-gray-800">Edit Grant</h2>
+            <h2 className="text-3xl font-semibold tracking-tight text-slate-900">Edit Grant</h2>
             <p className="text-sm text-gray-500 mt-1">
-              Editing: <span className="font-mono text-blue-700">
+              Editing: <span className="font-mono text-brand-700">
                 {grantNumber}
               </span>
             </p>
@@ -460,8 +460,8 @@ function EditGrant() {
           </div>
         )}
 
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-          <div className="grid grid-cols-2 gap-4">
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-200/80 p-5 sm:p-8">
+          <div className="grid grid-cols-1 gap-x-6 gap-y-5 sm:grid-cols-2">
 
             {/* ── Basic Information ─────────────────────────────── */}
             <SectionHeader title="Basic Information" />
@@ -507,7 +507,7 @@ function EditGrant() {
               {...f('sub_grant_no')} label="Sub Grant No."
               placeholder="Sub grant number if applicable"
             />
-            <div className="col-span-2">
+            <div className="col-span-full">
               <LinkField
                 {...f('link_to_complete_documents')}
                 label="Link to Complete Documents (Grant Application, PO & Invoice)"
@@ -568,7 +568,7 @@ function EditGrant() {
               {...f('payment_status')} label="Payment Status" required
               options={['Pending', 'Partial', 'Complete']}
             />
-            <div className="col-span-2">
+            <div className="col-span-full">
               <FileUploadField
                 name="payment_reference"
                 label="Payment Reference (Attachment)"
@@ -632,13 +632,13 @@ function EditGrant() {
               label="Packing List Reference"
               placeholder="Packing list reference"
             />
-            <div className="col-span-2">
+            <div className="col-span-full">
               <TextareaField
                 {...f('shipping_documents_comment')}
                 label="Shipping Documents Comment"
               />
             </div>
-            <div className="col-span-2">
+            <div className="col-span-full">
               <LinkField
                 {...f('link_to_shipping_documents')}
                 label="Link to Shipping Documents"
@@ -660,10 +660,10 @@ function EditGrant() {
               {...f('grn_number')} label="GRN Number"
               placeholder="GRN reference number"
             />
-            <div className="col-span-2">
+            <div className="col-span-full">
               <LinkField {...f('link_to_grn')} label="Link to GRN" />
             </div>
-            <div className="col-span-2">
+            <div className="col-span-full">
               <TextareaField
                 {...f('grn_receiving_comments')}
                 label="GRN / Receiving Comments"
@@ -708,7 +708,7 @@ function EditGrant() {
               label="IHHN Asset Tag Number"
               placeholder="Asset tag number"
             />
-            <div className="col-span-2">
+            <div className="col-span-full">
               <TextareaField
                 {...f('item_description')} label="Item Description"
               />
@@ -725,7 +725,7 @@ function EditGrant() {
               label="Department for Pictures"
               placeholder="Department name"
             />
-            <div className="col-span-2">
+            <div className="col-span-full">
               <FileUploadField
                 name="picture"
                 label="Picture / Attachment"
@@ -749,7 +749,7 @@ function EditGrant() {
                 </p>
               </div>
             </div>
-            <div className="col-span-2">
+            <div className="col-span-full">
               <LinkField
                 {...f('link_to_utilization_report')}
                 label="Link to Utilization Report"
@@ -763,8 +763,8 @@ function EditGrant() {
             <button
               onClick={handleSubmit}
               disabled={loading}
-              className="w-full bg-blue-700 text-white py-3 rounded-lg
-                         font-medium hover:bg-blue-800 transition
+              className="w-full bg-brand-700 text-white py-3 rounded-lg
+                         font-medium hover:bg-brand-800 transition
                          disabled:opacity-50"
             >
               {loading ? 'Saving changes...' : 'Save Changes'}

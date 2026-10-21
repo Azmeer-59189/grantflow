@@ -32,8 +32,8 @@ const STATUS_COLORS = {
   'Pending': '#d97706',
   'Incomplete Information': '#e11d48',
 }
-const PROJECT_COLORS = { 'Expansion': '#1f5668', 'Non-Expansion': '#7fbccb' }
-const BRAND_LINE = '#2f8099'
+const PROJECT_COLORS = { 'Expansion': '#6563cf', 'Non-Expansion': '#c4c7ed' }
+const BRAND_LINE = '#6563cf'
 const AMBER_LINE = '#d97706'
 
 const ALL_SECTIONS_ON = {
@@ -105,6 +105,8 @@ const TONES = {
 const ICONS = {
   dashboard: 'M4 4h6v7H4zM14 4h6v4h-6zM14 12h6v8h-6zM4 15h6v5H4z',
   records: 'M4 6h16M4 12h16M4 18h10',
+  history: 'M3 12a9 9 0 109-9 9 9 0 00-7 3M3 3v4h4M12 7v5l3 2',
+  refresh: 'M20 7v5h-5M4 17v-5h5M6 7a7 7 0 0112-1l2 6M4 12l2 6a7 7 0 0012-1',
   plus: 'M12 5v14M5 12h14',
   logout: 'M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9',
   alert: 'M12 9v4M12 17h.01M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z',
@@ -134,7 +136,7 @@ function StatusPill({ value }) {
 
 function Card({ title, subtitle, action, children, className = '' }) {
   return (
-    <section className={`rounded-xl border border-slate-200 bg-white ${className}`}>
+    <section className={`workspace-card rounded-2xl border border-slate-200/80 bg-white ${className}`}>
       {(title || action) && (
         <header className="flex items-start justify-between gap-4 px-5 pt-5">
           <div>
@@ -223,18 +225,18 @@ function computeCountryStats(grants) {
 
 function mapFill(geoName, stats, activeChapter) {
   const ourName = GEO_NAME_MAP[geoName]
-  if (!ourName) return '#e3ebef'
+  if (!ourName) return '#ebedf3'
   if (activeChapter) {
     const ch = stats.chapters[ourName]
-    if (!ch || !ch.has(activeChapter)) return '#e3ebef'
+    if (!ch || !ch.has(activeChapter)) return '#ebedf3'
   }
   const value = stats.values[ourName] || 0
-  if (value === 0) return '#c9dbe2'
+  if (value === 0) return '#dbddf0'
   const intensity = value / stats.max
-  if (intensity > 0.7) return '#163a47'
-  if (intensity > 0.4) return '#1f5668'
-  if (intensity > 0.1) return '#3f93ab'
-  return '#8fc3d1'
+  if (intensity > 0.7) return '#403e94'
+  if (intensity > 0.4) return '#6563cf'
+  if (intensity > 0.1) return '#9094e2'
+  return '#c4c7ed'
 }
 
 // ── Detail modal pieces ─────────────────────────────────────────────────────
@@ -451,46 +453,30 @@ function Dashboard({ session }) {
       {data?.cache_warning && <div role="alert" className="fixed bottom-4 left-4 right-4 z-50 rounded-lg border border-amber-400 bg-amber-50 p-4 text-sm text-amber-900">{data.cache_warning}</div>}
 
       {/* ── Side rail ─────────────────────────────────────────────── */}
-      <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col bg-brand-900 text-white md:flex">
-        <div className="flex items-center gap-3 px-5 py-6">
-          <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/10 font-bold ring-1 ring-white/20">G</span>
-          <div className="leading-tight">
-            <div className="text-base font-semibold">GrantFlow</div>
-            <div className="text-xs text-brand-300">IHHN and FOIH grants</div>
-          </div>
+      <aside className="sticky top-0 hidden h-screen w-64 shrink-0 flex-col border-r border-slate-200/80 bg-white md:flex">
+        <div className="flex items-center gap-3 px-6 py-8">
+          <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-600 text-lg font-bold text-white shadow-sm">G<span className="text-brand-200">.</span></span>
+          <div><div className="text-lg font-bold tracking-tight text-slate-900">GrantFlow</div><div className="text-[11px] font-medium tracking-wide text-slate-400">GRANTS WORKSPACE</div></div>
         </div>
-        <nav className="mt-2 flex-1 space-y-1 px-3">
-          <button onClick={() => navigate('/history')} className="w-full rounded-lg px-3 py-2.5 text-left text-sm text-white">Report history</button>
+        <div className="mx-4 mb-7 rounded-xl border border-slate-200/80 bg-slate-50/80 px-3.5 py-3">
+          <p className="text-xs font-semibold text-slate-700">IHHN & FOIH</p>
+          <p className="mt-0.5 text-xs text-slate-400">International grants team</p>
+        </div>
+        <nav className="flex-1 space-y-1.5 px-4" aria-label="Main navigation">
+          <p className="mb-3 px-3 text-[10px] font-semibold tracking-[0.16em] text-slate-400">WORKSPACE</p>
           {NAV.map(item => (
-            <button
-              key={item.id}
-              onClick={() => setActiveNav(item.id)}
-              className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition
-                ${activeNav === item.id
-                  ? 'bg-white/10 text-white'
-                  : 'text-brand-200 hover:bg-white/5 hover:text-white'}`}
-            >
-              <Icon name={item.id} className="h-[18px] w-[18px]" />
-              {item.label}
+            <button key={item.id} onClick={() => setActiveNav(item.id)} aria-current={activeNav === item.id ? 'page' : undefined}
+              className={`flex w-full items-center gap-3 rounded-xl px-3.5 py-3 text-sm font-medium transition ${activeNav === item.id ? 'bg-brand-50 text-brand-700' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'}`}>
+              <Icon name={item.id} className="h-[18px] w-[18px]" />{item.label}
+              {activeNav === item.id && <span className="ml-auto h-1.5 w-1.5 rounded-full bg-brand-500" />}
             </button>
           ))}
-          <button
-            onClick={() => navigate('/add-grant')}
-            className="mt-3 flex w-full items-center gap-3 rounded-lg border border-white/15 px-3 py-2.5
-                       text-sm font-medium text-white transition hover:bg-white/10"
-          >
-            <Icon name="plus" className="h-[18px] w-[18px]" />
-            Add grant
-          </button>
+          <button onClick={() => navigate('/history')} className="flex w-full items-center gap-3 rounded-xl px-3.5 py-3 text-sm font-medium text-slate-500 hover:bg-slate-50 hover:text-slate-900"><Icon name="history" className="h-[18px] w-[18px]" />Report history</button>
+          <button onClick={() => navigate('/add-grant')} className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-brand-600 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-brand-700"><Icon name="plus" className="h-4 w-4" />Add new grant</button>
         </nav>
-        <div className="border-t border-white/10 px-5 py-4">
-          <p className="truncate text-xs text-brand-300">{session.user.email}</p>
-          <button
-            onClick={handleLogout}
-            className="mt-2 flex items-center gap-2 text-sm text-brand-200 transition hover:text-white"
-          >
-            <Icon name="logout" className="h-4 w-4" /> Sign out
-          </button>
+        <div className="m-4 rounded-xl border border-slate-200/80 p-3.5">
+          <div className="flex items-center gap-2.5"><span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-100 text-xs font-semibold text-brand-700">{session.user.email?.[0]?.toUpperCase() || 'G'}</span><div className="min-w-0"><p className="text-xs font-semibold text-slate-700">Your workspace</p><p className="truncate text-[11px] text-slate-400">{session.user.email}</p></div></div>
+          <button onClick={handleLogout} className="mt-3 flex items-center gap-2 text-xs font-medium text-slate-500 hover:text-rose-600"><Icon name="logout" className="h-3.5 w-3.5" />Sign out</button>
         </div>
       </aside>
 
@@ -515,17 +501,24 @@ function Dashboard({ session }) {
           <button onClick={handleLogout} className="text-xs text-slate-500">Sign out</button>
         </div>
 
-        <div className="mx-auto max-w-[1400px] p-4 md:p-8">
+        <div className="mx-auto max-w-[1400px] p-4 md:p-8 lg:px-10">
+          <div className="mb-8 flex flex-wrap items-center justify-between gap-3 border-b border-slate-200/80 pb-5">
+            <p className="text-xs font-medium text-slate-400">Workspace <span className="mx-2 text-slate-300">/</span><span className="text-slate-700">{activeNav === 'dashboard' ? 'Overview' : 'Grant records'}</span></p>
+            <div className="flex items-center gap-3">
+              <button onClick={() => navigate('/history')} className="text-xs font-medium text-slate-500 hover:text-brand-700 md:hidden">History</button>
+              <button onClick={fetchGrants} disabled={loading} className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-600 hover:border-brand-200 hover:text-brand-700 disabled:opacity-50"><Icon name="refresh" className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />{loading ? 'Refreshing' : 'Refresh data'}</button>
+            </div>
+          </div>
 
           {/* ═══ DASHBOARD VIEW ═══ */}
           {activeNav === 'dashboard' && (
             <>
               <div className="mb-6">
-                <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Dashboard</h1>
+                <h1 className="text-3xl font-semibold tracking-tight text-slate-900">Your grants at a glance</h1>
                 <p className="mt-1 text-sm text-slate-500">
                   {activeChapter
                     ? `Showing grants for ${activeChapter}`
-                    : 'Grant utilization across all chapters'}
+                    : 'Track funding, follow progress, and keep every chapter moving.'}
                 </p>
               </div>
 
@@ -538,7 +531,7 @@ function Dashboard({ session }) {
                       key={ch || 'all'}
                       onClick={() => setActiveChapter(ch)}
                       aria-pressed={active}
-                      className={`rounded-full border px-4 py-1.5 text-sm font-medium transition
+                      className={`rounded-lg border px-3.5 py-2 text-xs font-medium transition
                         ${active
                           ? 'border-brand-700 bg-brand-700 text-white'
                           : 'border-slate-200 bg-white text-slate-600 hover:border-brand-300 hover:text-brand-800'}`}
@@ -560,9 +553,7 @@ function Dashboard({ session }) {
               {data && (
                 <>
                   {/* KPI band */}
-                  <section className="mb-6 grid overflow-hidden rounded-xl border border-slate-200 bg-white
-                                      md:grid-cols-[1.4fr_1fr_1fr_1fr_1.3fr] md:divide-x md:divide-slate-200
-                                      max-md:divide-y max-md:divide-slate-200">
+                  <section className="kpi-grid mb-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-[1.4fr_1fr_1fr_1fr_1.3fr]">
                     <div className="p-5">
                       <p className="text-sm text-slate-500">Total grant value</p>
                       <p className="mt-1 text-3xl font-semibold tabular-nums tracking-tight text-brand-800">
@@ -709,7 +700,7 @@ function Dashboard({ session }) {
 
                       <div className="absolute bottom-4 left-4 flex items-center gap-2 rounded-md bg-white/90 px-2.5 py-1.5 text-xs text-slate-500">
                         <span>Lower</span>
-                        {['#8fc3d1', '#3f93ab', '#1f5668', '#163a47'].map(c => (
+                        {['#c4c7ed', '#9094e2', '#6563cf', '#403e94'].map(c => (
                           <span key={c} className="h-2.5 w-5 rounded-sm" style={{ background: c }} />
                         ))}
                         <span>Higher</span>
@@ -728,7 +719,7 @@ function Dashboard({ session }) {
                           <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: '#94a3b8' }}
                                  axisLine={false} tickLine={false} />
                           <Tooltip contentStyle={TOOLTIP_STYLE} cursor={{ fill: 'rgba(31,86,104,0.05)' }} />
-                          <Bar dataKey="value" radius={[5, 5, 0, 0]} fill="#1f5668">
+                          <Bar dataKey="value" radius={[5, 5, 0, 0]} fill="#6563cf">
                             <LabelList dataKey="value" position="top"
                                        style={{ fontSize: '12px', fill: '#475569', fontWeight: 600 }} />
                           </Bar>
@@ -862,7 +853,7 @@ function Dashboard({ session }) {
                     </div>
                   ) : (
                     <div className="max-h-[68vh] overflow-auto">
-                      <table className="w-full text-sm" style={{ minWidth: '1600px' }}>
+                      <table data-workspace-table="true" className="w-full text-sm" style={{ minWidth: '1600px' }}>
                         <thead>
                           <tr className="border-b border-slate-200 text-left">
                             <th className={th}>Grant number</th>

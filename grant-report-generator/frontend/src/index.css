@@ -1,31 +1,41 @@
 @import "tailwindcss";
 
-/* ── GrantFlow theme ───────────────────────────────────────────────
-   Change the look of the whole app by editing these values.
-   Use them as bg-brand-700, text-brand-800, border-brand-200, bg-canvas ... */
 @theme {
   --font-sans: "Figtree", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-
-  --color-brand-50:  #eef6f8;
-  --color-brand-100: #d6eaef;
-  --color-brand-200: #b0d6df;
-  --color-brand-300: #82bccb;
-  --color-brand-400: #4f9db3;
-  --color-brand-500: #2f8099;
-  --color-brand-600: #266a80;
-  --color-brand-700: #1f5668;
-  --color-brand-800: #1b4656;
-  --color-brand-900: #163a47;
-  --color-brand-950: #0d2530;
-
-  --color-canvas: #f3f7f9;
-  --color-ink: #14303b;
+  --color-brand-50: #f1f2ff;
+  --color-brand-100: #e5e7ff;
+  --color-brand-200: #cfd3ff;
+  --color-brand-300: #aeb5fc;
+  --color-brand-400: #8991f4;
+  --color-brand-500: #6d72e5;
+  --color-brand-600: #595bd0;
+  --color-brand-700: #4b49b5;
+  --color-brand-800: #403e94;
+  --color-brand-900: #363578;
+  --color-brand-950: #24234c;
+  --color-canvas: #f7f8fa;
+  --color-ink: #252937;
 }
 
 @layer base {
   html { -webkit-font-smoothing: antialiased; }
-  body { background: var(--color-canvas); color: var(--color-ink); font-family: var(--font-sans); }
-  :focus-visible { outline: 2px solid var(--color-brand-500); outline-offset: 2px; }
+  body { margin: 0; background: var(--color-canvas); color: var(--color-ink); font-family: var(--font-sans); }
+  :focus-visible { outline: 3px solid var(--color-brand-400); outline-offset: 3px; }
   button { cursor: pointer; }
   button:disabled { cursor: not-allowed; }
+  button, a, input, select, textarea { transition-duration: 160ms; }
+  input, select, textarea { accent-color: var(--color-brand-600); }
+  ::selection { background: var(--color-brand-100); color: var(--color-brand-950); }
+  h1, h2, h3 { text-wrap: balance; }
+}
+
+.workspace-card { box-shadow: 0 2px 4px rgb(25 30 55 / 2%); }
+.kpi-grid > div { border: 1px solid #e8eaf0; border-radius: 16px; background: white; box-shadow: 0 2px 4px rgb(25 30 55 / 2%); }
+.kpi-grid > div:first-child { border-color: #d9dcf7; background: #f0f1ff; }
+table[data-workspace-table] thead { background: #f8f9fc; }
+table[data-workspace-table] tbody tr { transition: background 140ms; }
+table[data-workspace-table] tbody tr:hover { background: #f7f7ff; }
+.login-art { background: #eeeffa; background-image: radial-gradient(ellipse at 15% 10%, #f7f4ec 0%, transparent 55%), radial-gradient(ellipse at 85% 90%, #dcdff8 0%, transparent 60%); }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
