@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 import config
 from api.routes import router as grants_router
+from api.access import router as access_router
 
 
 app = FastAPI(
@@ -26,6 +27,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(grants_router)
+app.include_router(access_router)
 
 
 @app.get("/health", tags=["System"])

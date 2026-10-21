@@ -76,7 +76,7 @@ Tests mock external services and do not touch production data. After deployment,
 ## Grant workflow improvements: rollout order
 
 1. Run `backend/migrations/20261021_roles_audit.sql` in the Supabase SQL Editor. It adds the audit table and restricts writes to the existing `grant-pictures` bucket. Existing permissive storage policies still need to allow editors to upload; the migration adds restrictions rather than granting upload access.
-2. Assign your team's write users the trusted `app_metadata.grantflow_role` value `editor` or `admin` through Supabase admin tooling. The migration includes an SQL example using an exact user UUID. Unassigned users default to `viewer`. Do not use user-editable `user_metadata` for permissions. Have users sign out/in after assignment. Admins currently have editor capabilities; role administration remains in Supabase.
+2. Assign your team's write users the trusted `app_metadata.grantflow_role` value `editor` or `admin` through Supabase admin tooling. The migration includes an SQL example using an exact user UUID. Unassigned users default to `viewer`. Do not use user-editable `user_metadata` for permissions. Have users sign out/in after assignment. After the access-management migration below, owners and admins can manage roles in the Team access screen.
 3. Deploy the backend, then the frontend. This frontend requires the new `/api/me` endpoint. Keep the schema and backend deployment ahead of the frontend. Without the migration, grant saves fail before changing Sheets; without explicit editor assignment, users can read but cannot save or upload.
 4. Run the read-only smoke checker below, then test authenticated workflows using disposable test data in your chosen environment. The checker never writes grants or uploads files. `GRANTFLOW_ACCESS_TOKEN`, if provided through your local environment, enables authenticated read checks; it is never printed.
 
@@ -95,3 +95,16 @@ Viewers can review grants, reports, history, and activity and generate reports. 
 On October 21, 2026, read-only HTTP checks confirmed the current Vercel `/login` and `/add-grant` routes return 200, Render `/health` returns 200 with status `ok`, and anonymous `/api/grants` returns 401. These checks apply to the previously deployed version. Authenticated workflows and the new migration still require post-deployment verification; no production grant or attachment was changed by these checks.
 
 Frontend checks now include `npm test` for sorting, pagination, and server-rendered form components. Backend tests include viewer/editor/admin access and audited-write failure handling.
+
+
+## Owner and team access management
+
+Run `backend/migrations/20261021_access_management.sql` after the earlier roles/audit migration and before deploying this version. It bootstraps the **existing, confirmed** `syedazmeer2222@gmail.com` account as owner if no owner exists. It does not create an account or set a password. If an owner already exists, bootstrap is skipped; this prevents rerunning the migration from undoing a later ownership transfer. Owner assignment is not active until the SQL is actually applied.
+
+The `/access` screen lists existing Supabase Auth accounts and permission-change history. It is linked from the dashboard for owners/admins. Owners can grant/revoke all roles. Admins can manage viewer/editor/disabled accounts but cannot modify owners/admins or grant those privileged roles. The last owner cannot be demoted or disabled through the app; assign a second owner before transferring ownership. New-user provisioning remains in Supabase, so role management does not send invitations or create passwords.
+
+Role changes and their audit entries share a single database transaction. The role-change RPC is executable only by the backend service role, rechecks the actor's current metadata, and serializes concurrent role changes to protect the last owner. Direct superuser/admin edits outside the app can bypass these application guarantees. All role metadata other than `grantflow_role` is preserved.
+
+Revoking access assigns `disabled`: subsequent GrantFlow API requests are blocked, and Storage write checks reject the account. Public attachments and the underlying Supabase account are not deleted. Owners can restore access using the same screen. Sign out/in or reload the app to update visible controls after an access change; the backend checks current permissions on every request independently of the displayed UI.
+
+After applying the migration, deploy backend then frontend, sign out/in as the owner, and open **Team access**. Confirm owner/editor/viewer/disabled behavior with test accounts. SQL migration behavior still requires verification against the actual Supabase database; offline API tests do not substitute for that check.

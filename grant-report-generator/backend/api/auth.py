@@ -34,16 +34,24 @@ def require_user(credentials: HTTPAuthorizationCredentials = Depends(bearer)):
         raise HTTPException(503, 'Authentication service is unavailable.') from error
     if user is None:
         raise HTTPException(401, 'Invalid access token.')
+    if user_role(user) == 'disabled':
+        raise HTTPException(403, 'Your GrantFlow access has been revoked. Contact the workspace owner.')
     return user
 
 
 def user_role(user) -> str:
     """Only administrator-controlled Auth metadata grants write access."""
     role = (getattr(user, 'app_metadata', None) or {}).get('grantflow_role', 'viewer')
-    return role if role in {'viewer', 'editor', 'admin'} else 'viewer'
+    return role if role in {'viewer', 'editor', 'admin', 'owner', 'disabled'} else 'viewer'
 
 
 def require_editor(user=Depends(require_user)):
-    if user_role(user) not in {'editor', 'admin'}:
+    if user_role(user) not in {'editor', 'admin', 'owner'}:
         raise HTTPException(403, 'Your account has view-only access. Ask an administrator for editor access.')
+    return user
+
+
+def require_admin(user=Depends(require_user)):
+    if user_role(user) not in {'admin', 'owner'}:
+        raise HTTPException(403, 'Administrator access is required.')
     return user

@@ -172,7 +172,7 @@ function Dashboard({ session }) {
   const navigate = useNavigate()
   const location = useLocation()
   const { role } = useAccess()
-  const canEdit = ['editor', 'admin'].includes(role)
+  const canEdit = ['editor', 'admin', 'owner'].includes(role)
   const saved = useSavedViews(session.user.id)
   const [viewName, setViewName] = useState('')
   const [selectedView, setSelectedView] = useState('')
@@ -323,6 +323,7 @@ function Dashboard({ session }) {
           <p className="mt-0.5 text-xs text-slate-400">International grants team</p>
         </div>
         <nav className="flex-1 space-y-1.5 px-4" aria-label="Main navigation">
+          {['admin', 'owner'].includes(role) && <button onClick={() => navigate('/access')} className="flex w-full items-center gap-3 rounded-xl px-3.5 py-3 text-sm font-medium text-brand-700 hover:bg-brand-50"><Icon name="records" className="h-[18px] w-[18px]" />Team access</button>}
           <button onClick={() => navigate('/audit')} className="flex w-full items-center gap-3 rounded-xl px-3.5 py-3 text-sm font-medium text-slate-500 hover:bg-slate-50"><Icon name="history" className="h-[18px] w-[18px]" />Grant activity</button>
           <p className="mb-3 px-3 text-[10px] font-semibold tracking-[0.16em] text-slate-400">WORKSPACE</p>
           {NAV.map(item => (
@@ -363,6 +364,7 @@ function Dashboard({ session }) {
         </div>
 
         <div className="mx-auto max-w-[1400px] p-4 md:p-8 lg:px-10">
+          {['admin', 'owner'].includes(role) && <button onClick={() => navigate('/access')} className="mb-3 mr-4 text-xs font-medium text-brand-600 md:hidden">Team access</button>}
           {location.state?.notice && <p role="status" className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">{location.state.notice}</p>}
           {!canEdit && <p className="mb-4 rounded-xl border border-brand-100 bg-brand-50 p-4 text-sm text-brand-700">View-only access: you can review grants, activity, and reports. An administrator can grant editing access.</p>}
           <button onClick={() => navigate('/audit')} className="mb-3 text-xs font-medium text-brand-600 md:hidden">Grant activity</button>
