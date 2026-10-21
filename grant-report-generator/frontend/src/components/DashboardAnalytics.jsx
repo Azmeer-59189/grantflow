@@ -2,6 +2,7 @@ import {
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer,
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
 } from 'recharts'
+import { lazy, Suspense, useState } from 'react'
 import { formatMonth } from '../lib/dates'
 import { fundingByChapter, paymentsByMonth, pipelineCounts, valueByCountry } from '../lib/pipeline'
 
@@ -11,6 +12,9 @@ const SERIES = '#595bd0'      // brand-600, single-series marks
 const PAID = '#4b49b5'        // brand-700
 const REMAINING = '#8991f4'   // brand-400
 const GRID = '#eef0f4'
+
+// The map library and world geometry load only when someone picks the map view.
+const CountryMap = lazy(() => import('./CountryMap'))
 
 const STATUS_COLORS = {
   'Complete': '#059669',
@@ -163,12 +167,37 @@ function FundingCard({ grants }) {
 }
 
 // ── Grant value by country ──────────────────────────────────────────────────
+const COUNTRY_VIEW_KEY = 'grantflow:country-view'
+
 function CountryCard({ grants }) {
   const rows = valueByCountry(grants)
   const max = Math.max(...rows.map(r => r.value), 1)
+  const [view, setView] = useState(() => {
+    try { return localStorage.getItem(COUNTRY_VIEW_KEY) === 'map' ? 'map' : 'bars' } catch { return 'bars' }
+  })
+  function choose(next) {
+    setView(next)
+    try { localStorage.setItem(COUNTRY_VIEW_KEY, next) } catch { /* per-browser convenience only */ }
+  }
+  const toggle = (
+    <div role="group" aria-label="Chart type" className="inline-flex rounded-xl bg-slate-100 p-1">
+      {[['bars', 'Bars'], ['map', 'Map']].map(([key, text]) => (
+        <button key={key} type="button" aria-pressed={view === key} onClick={() => choose(key)}
+                className={`rounded-lg px-3 py-1.5 text-xs font-medium transition
+                  ${view === key ? 'bg-white text-brand-700 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}>
+          {text}
+        </button>
+      ))}
+    </div>
+  )
   return (
-    <Card title="Grant value by country" subtitle="Total USD, largest first">
+    <Card title="Grant value by country" subtitle={view === 'map' ? 'Darker countries hold more grant value' : 'Total USD, largest first'} action={rows.length > 0 && toggle}>
       {rows.length === 0 ? <Empty>No data yet</Empty> : <>
+        {view === 'map' ? (
+          <Suspense fallback={<div className="flex h-80 items-center justify-center rounded-xl bg-slate-50 text-sm text-slate-400">Loading map…</div>}>
+            <CountryMap rows={rows} />
+          </Suspense>
+        ) : (
         <ul className="space-y-2">
           {rows.map(row => (
             <li key={row.country} className="grid grid-cols-[minmax(6rem,9rem)_1fr_auto] items-center gap-3 text-sm"
@@ -182,6 +211,7 @@ function CountryCard({ grants }) {
             </li>
           ))}
         </ul>
+        )}
         <TableView rows={rows} columns={[
           { label: 'Country', value: r => r.country },
           { label: 'Grants', value: r => r.count, numeric: true },
