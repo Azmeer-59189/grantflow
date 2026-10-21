@@ -96,6 +96,13 @@ class SheetsWriterTests(unittest.TestCase):
         with self.assertRaisesRegex(sheets_writer.WriteRejectedError, 'rows 2, 3'):
             sheets_writer.update_grant('G-1', self.grant)
 
+    def test_exchange_rate_written_only_when_the_sheet_has_the_column(self):
+        sheets_writer.append_grant(dict(self.grant, grant_number='G-4', exchange_rate=0.73))
+        self.assertNotIn(0.73, self.fake.appended)
+        self.fake.rows[0] = self.header + ['Exchange Rate']
+        sheets_writer.append_grant(dict(self.grant, grant_number='G-5', exchange_rate=0.73))
+        self.assertEqual(self.fake.appended[-1], 0.73)
+
     def test_column_letters(self):
         self.assertEqual([sheets_writer._column_letter(i) for i in (0, 25, 26, 54, 701)],
                          ['A', 'Z', 'AA', 'BC', 'ZZ'])

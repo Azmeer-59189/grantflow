@@ -84,6 +84,35 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(calculate_report_status(dict(full, link_to_utilization_report='https://x')), 'Complete')
         self.assertIsNone(process_grant_rows([dict(self.grant, quantity='')]).grants[0].quantity)
 
+    def test_exchange_rate_is_read_and_validated(self):
+        from services.data_processor import validate_grant_dict
+        self.assertEqual(process_grant_rows([dict(self.grant, exchange_rate='0.73')]).grants[0].exchange_rate, 0.73)
+        self.assertIsNone(process_grant_rows([self.grant]).grants[0].exchange_rate)
+        valid = dict(self.grant, chapter='IDF', project_type='Expansion', payment_status='Pending')
+        validate_grant_dict(dict(valid, exchange_rate=0.73))
+        with self.assertRaises(GrantDataValidationError):
+            validate_grant_dict(dict(valid, exchange_rate=0))
+
+    def test_report_history_saves_without_new_columns_before_migration(self):
+        from postgrest.exceptions import APIError
+        from services import supabase_service
+        inserted = []
+        def insert(payload):
+            inserted.append(payload)
+            request = unittest.mock.MagicMock()
+            if 'grant_number' in payload:
+                request.execute.side_effect = APIError({'code': 'PGRST204', 'message': "Could not find the 'grant_number' column"})
+            else:
+                request.execute.return_value.data = [payload]
+            return request
+        client = unittest.mock.MagicMock()
+        client.table.return_value.insert.side_effect = insert
+        with patch.object(supabase_service, 'get_supabase_client', return_value=client), self.assertLogs(level='WARNING'):
+            saved = supabase_service.save_report_metadata(generated_by='u', report_format='PDF', row_count=1,
+                                                          total_received=1, total_beneficiaries=1, grant_number='DEMO-1')
+        self.assertEqual(len(inserted), 2)
+        self.assertNotIn('grant_number', saved)
+
     def test_version_changes_when_the_row_changes(self):
         first = process_grant_rows([self.grant]).grants[0].version
         self.assertEqual(first, process_grant_rows([dict(self.grant)]).grants[0].version)
@@ -147,6 +176,7 @@ class RegressionTests(unittest.TestCase):
                 response = self.client.post(f'/api/reports/{format}/DEMO-1', json={'sections': {'shipping': False}})
             self.assertEqual(response.status_code, 200)
             history.assert_called_once()
+            self.assertEqual(history.call_args.kwargs['grant_number'], 'DEMO-1')
             self.assertFalse(directories[-1].exists())
             if format == 'word':
                 document = Document(io.BytesIO(response.content))

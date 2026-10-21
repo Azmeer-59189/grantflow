@@ -110,6 +110,7 @@ export default function GrantDrawer({ grant: g, onClose, onEdit, onReport, canEd
 
           <Section title="Financial summary">
             <Field label="Secondary currency" value={currency} />
+            {g.exchange_rate > 0 && <Field label="Exchange rate used" value={`1 ${currency} = ${g.exchange_rate} USD`} />}
             <Field label={`Total grant (${currency})`} value={orig(g.total_grant_amount_orig)} />
             <Field label={`Current payment (${currency})`} value={orig(g.current_payment_orig)} />
             <Field label="Remaining (USD)" value={usd(g.remaining_payment_usd)} emphasis="text-amber-700" />

@@ -4,11 +4,13 @@ This file uses the Supabase *service key*. Keep that key in the root .env file
 and never import this module into the React frontend.
 """
 
+import logging
 import os
 from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
+from postgrest.exceptions import APIError
 from supabase import Client, create_client
 
 
@@ -73,6 +75,8 @@ def save_report_metadata(
     total_received: float,
     total_beneficiaries: int,
     report_url: str | None = None,
+    grant_number: str | None = None,
+    generated_by_email: str | None = None,
 ) -> dict[str, Any]:
     """Save the summary shown later on the Report History page.
 
@@ -91,18 +95,29 @@ def save_report_metadata(
         "total_received": total_received,
         "total_beneficiaries": total_beneficiaries,
     }
-    response = get_supabase_client().table("reports").insert(payload).execute()
+    extra = {"grant_number": grant_number, "generated_by_email": generated_by_email}
+    table = get_supabase_client().table("reports")
+    try:
+        response = table.insert({**payload, **extra}).execute()
+    except APIError as error:
+        # Until migration 20261023_report_history_grant.sql runs, the new
+        # columns do not exist (PostgREST PGRST204). Save without them.
+        if str(error.code) != "PGRST204":
+            raise
+        logging.warning("reports table lacks grant_number/generated_by_email; run the 20261023 migration")
+        response = table.insert(payload).execute()
     return response.data[0]
 
 
-def get_report_history() -> list[dict[str, Any]]:
-    """Return reports with newest reports shown first."""
+def get_report_history(limit: int = 200) -> list[dict[str, Any]]:
+    """Return the most recent reports, newest first."""
 
     response = (
         get_supabase_client()
         .table("reports")
         .select("*")
         .order("generated_at", desc=True)
+        .limit(limit)
         .execute()
     )
     return response.data

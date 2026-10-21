@@ -55,7 +55,7 @@ COLUMN_ORDER = [
 ]
 REQUIRED_KEYS = {_normalise_header(label): label for label in COLUMN_ORDER}
 # Written only when the Sheet has a matching column.
-OPTIONAL_KEYS = {"region"}
+OPTIONAL_KEYS = {"region", "exchange_rate"}
 DEFAULT_TAB_NAME = os.getenv("GOOGLE_SHEET_TAB", "Grants")
 
 

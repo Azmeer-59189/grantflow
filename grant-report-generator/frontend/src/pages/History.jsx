@@ -19,7 +19,7 @@ export default function History() {
   }, [])
   const th = 'px-5 py-3 text-xs font-semibold text-slate-500'
   return (
-    <AppShell title="Report history" subtitle="Every PDF and Word report generated. Files are created on demand and not stored." width="max-w-5xl">
+    <AppShell title="Report history" subtitle="The 200 most recent PDF and Word reports. Files are created on demand and not stored." width="max-w-5xl">
       {error && <div className="mb-4"><Alert>{error}</Alert></div>}
       <section className="workspace-card overflow-hidden rounded-2xl border border-slate-200/80 bg-white">
         {!error && rows === null ? (
@@ -30,16 +30,17 @@ export default function History() {
           <div className="overflow-x-auto">
             <table data-workspace-table="true" className="w-full text-left text-sm">
               <thead className="border-b border-slate-200"><tr>
-                <th className={th}>Generated</th><th className={th}>Format</th><th className={`${th} text-right`}>Grants</th>
+                <th className={th}>Generated</th><th className={th}>Grant</th><th className={th}>Format</th><th className={th}>By</th>
                 <th className={`${th} text-right`}>Payment (USD)</th><th className={`${th} text-right`}>Beneficiaries</th>
               </tr></thead>
               <tbody className="divide-y divide-slate-100">{rows.map(row => (
                 <tr key={row.id}>
                   <td className="whitespace-nowrap px-5 py-3.5 text-slate-700">{new Date(row.generated_at).toLocaleString()}</td>
+                  <td className="whitespace-nowrap px-5 py-3.5 font-medium text-brand-700">{row.grant_number || <span className="font-normal text-slate-400">Not recorded</span>}</td>
                   <td className="px-5 py-3.5">
                     <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${row.format === 'PDF' ? 'bg-rose-50 text-rose-700 ring-rose-600/20' : 'bg-brand-50 text-brand-700 ring-brand-600/20'}`}>{row.format}</span>
                   </td>
-                  <td className="px-5 py-3.5 text-right tabular-nums">{row.row_count}</td>
+                  <td className="max-w-56 truncate px-5 py-3.5 text-slate-600">{row.generated_by_email || <span className="text-slate-400">—</span>}</td>
                   <td className="px-5 py-3.5 text-right tabular-nums">{Number(row.total_received).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
                   <td className="px-5 py-3.5 text-right tabular-nums">{row.total_beneficiaries}</td>
                 </tr>

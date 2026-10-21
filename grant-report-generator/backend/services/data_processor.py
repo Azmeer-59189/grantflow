@@ -86,6 +86,7 @@ NUMBER_LABELS = {
     "remaining_payment_usd": "Remaining Payment (USD)",
     "quantity": "Quantity",
     "no_of_beneficiaries": "No. of Beneficiaries",
+    "exchange_rate": "Exchange Rate",
 }
 
 
@@ -196,6 +197,7 @@ class GrantRecord:
     link_to_utilization_report: str
     item_description: str
     version: str = ""
+    exchange_rate: float | None = None  # optional Sheet column
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -254,6 +256,10 @@ def validate_grant_dict(grant: dict, is_new: bool = True) -> None:
         raise GrantDataValidationError(
             f"{chapter} grants can only be: {', '.join(sorted(allowed))}."
         )
+
+    rate = grant.get("exchange_rate")
+    if rate is not None and not rate > 0:
+        raise GrantDataValidationError("Exchange rate must be greater than 0.")
 
     # Dropdown values
     if grant.get("country") not in VALID_COUNTRIES:

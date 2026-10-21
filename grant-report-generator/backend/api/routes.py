@@ -164,6 +164,8 @@ class GrantPayload(BaseModel):
     report_status: Optional[str] = "Incomplete Information"
     link_to_utilization_report: Optional[str] = ""
     item_description: Optional[str] = ""
+    # USD per 1 unit of secondary_currency, as used for the USD amounts.
+    exchange_rate: Optional[float] = None
     # Row fingerprint from GET; required when editing so stale saves are refused.
     version: Optional[str] = None
 
@@ -319,6 +321,7 @@ def _download_report(grant_number, payload, report_format, user):
             create_word_report(grant, output, sections=sections)
         supabase_service.save_report_metadata(
             generated_by=str(user.id), report_format='PDF' if report_format == 'pdf' else 'Word',
+            grant_number=grant_number, generated_by_email=getattr(user, 'email', None),
             row_count=1, total_received=grant.get('current_payment_usd') or 0,
             total_beneficiaries=int(grant.get('no_of_beneficiaries') or 0),
         )

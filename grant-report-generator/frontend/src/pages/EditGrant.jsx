@@ -75,7 +75,8 @@ function EditGrant() {
       setVersion(data.version || '')
       // Keep the rate the saved amounts were converted at; only look one up
       // when there is nothing saved to derive it from.
-      const saved = loaded.secondary_currency ? impliedRate(loaded) : 1
+      // Prefer the rate stored in the Sheet; older grants fall back to the saved amounts.
+      const saved = loaded.secondary_currency ? (data.exchange_rate || impliedRate(loaded)) : 1
       if (saved) setRate(saved, loaded.secondary_currency ? 'saved' : 'usd')
       else loadRate(loaded.secondary_currency)
 
@@ -124,7 +125,7 @@ function EditGrant() {
         {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...toPayload(form), version }),
+          body: JSON.stringify({ ...toPayload(form), exchange_rate: form.secondary_currency ? fx.rate : null, version }),
         }
       )
       const data = await response.json()

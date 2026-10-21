@@ -136,7 +136,7 @@ function AddGrant() {
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(toPayload(form)),
+          body: JSON.stringify({ ...toPayload(form), exchange_rate: form.secondary_currency ? fx.rate : null }),
         }
       )
       const data = await response.json()

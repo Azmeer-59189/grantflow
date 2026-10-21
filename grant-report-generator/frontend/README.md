@@ -1,16 +1,34 @@
-# React + Vite
+# GrantFlow frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+React + Vite app for the GrantFlow grants workspace. It talks to the FastAPI
+backend in `../backend` and signs users in with Supabase Auth.
 
-Currently, two official plugins are available:
+## Run locally
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+```sh
+npm install
+npm run dev        # http://localhost:5173
+```
 
-## React Compiler
+Set these in the root `.env` (see `.env.example`):
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+| Variable | Purpose |
+|---|---|
+| `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` | Supabase sign-in and file uploads |
+| `VITE_API_URL` | Backend URL, e.g. `http://localhost:8000` |
 
-## Expanding the ESLint configuration
+## Checks
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+```sh
+npm run lint
+npm test           # node --test, no network or credentials needed
+npm run build
+```
+
+## Where things live
+
+- `src/pages/` — one file per screen (Overview/Records, Add/Edit grant, History, Activity, Team access)
+- `src/components/AppShell.jsx` — sidebar, mobile menu and page frame shared by every page
+- `src/components/ui.jsx` — buttons, cards, status pills, dialogs
+- `src/lib/` — logic with tests: report status and amounts (`grantForm.js`), pipeline and timeline
+  (`pipeline.js`), "Needs attention" rules (`attention.js`), CSV export (`csv.js`), date parsing (`dates.js`)
