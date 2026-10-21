@@ -1,3 +1,6 @@
+import GrantSections from '../components/GrantSections'
+import FormProgress from '../components/FormProgress'
+import useUnsavedChanges from '../hooks/useUnsavedChanges'
 import { apiFetch } from '../lib/api'
 import { useState, useEffect, useRef } from 'react'
 import FileUploadField from '../components/FileUploadField'
@@ -86,11 +89,12 @@ function SectionHeader({ title }) {
 function TextField({ name, label, placeholder, required, value, onChange, disabled }) {
   return (
     <div>
-      <label className={labelClass}>
+      <label htmlFor={name} className={labelClass}>
         {label} {required && <span className="text-red-500">*</span>}
       </label>
       <input
         type="text"
+        id={name}
         name={name}
         value={value}
         onChange={onChange}
@@ -105,10 +109,11 @@ function TextField({ name, label, placeholder, required, value, onChange, disabl
 function NumberField({ name, label, readOnly, hint, value, onChange }) {
   return (
     <div>
-      <label className={labelClass}>{label}</label>
+      <label htmlFor={name} className={labelClass}>{label}</label>
       {hint && <p className="text-xs text-brand-500 mb-1">{hint}</p>}
       <input
         type="number"
+        id={name}
         name={name}
         value={value}
         onChange={onChange}
@@ -124,9 +129,10 @@ function NumberField({ name, label, readOnly, hint, value, onChange }) {
 function DateField({ name, label, value, onChange }) {
   return (
     <div>
-      <label className={labelClass}>{label}</label>
+      <label htmlFor={name} className={labelClass}>{label}</label>
       <input
         type="date"
+        id={name}
         name={name}
         value={value}
         onChange={onChange}
@@ -139,10 +145,11 @@ function DateField({ name, label, value, onChange }) {
 function SelectField({ name, label, options, required, value, onChange }) {
   return (
     <div>
-      <label className={labelClass}>
+      <label htmlFor={name} className={labelClass}>
         {label} {required && <span className="text-red-500">*</span>}
       </label>
       <select
+        id={name}
         name={name}
         value={value}
         onChange={onChange}
@@ -160,11 +167,12 @@ function SelectField({ name, label, options, required, value, onChange }) {
 function LinkField({ name, label, value, onChange }) {
   return (
     <div>
-      <label className={labelClass}>{label}</label>
+      <label htmlFor={name} className={labelClass}>{label}</label>
       <div className="flex gap-2">
         <input
           type="url"
-          name={name}
+          id={name}
+        name={name}
           value={value}
           onChange={onChange}
           placeholder="https://"
@@ -190,8 +198,9 @@ function LinkField({ name, label, value, onChange }) {
 function TextareaField({ name, label, value, onChange }) {
   return (
     <div>
-      <label className={labelClass}>{label}</label>
+      <label htmlFor={name} className={labelClass}>{label}</label>
       <textarea
+        id={name}
         name={name}
         value={value}
         onChange={onChange}
@@ -227,6 +236,8 @@ function AddGrant() {
   const [form, setForm] = useState(INITIAL_FORM)
 
   // Calculate report status on the fly for preview
+  const { dirty, markSaved } = useUnsavedChanges(form)
+
   function calcReportStatus(f) {
     const requiredFields = [
       'year', 'country', 'chapter', 'grant_number', 'project_type', 'department',
@@ -365,7 +376,8 @@ async function handleSubmit() {
         }
         throw new Error(typeof detail === 'string' ? detail : 'Failed to add grant')
       }
-      navigate('/')
+      markSaved()
+      navigate('/', { state: { notice: data.audit_warning || 'Grant saved successfully.' } })
     } catch (err) {
       setError(err.message)
     } finally {
@@ -429,10 +441,12 @@ async function handleSubmit() {
         )}
 
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200/80 p-5 sm:p-8">
-          <div className="grid grid-cols-1 gap-x-6 gap-y-5 sm:grid-cols-2">
+          <fieldset disabled={loading}>
+          <FormProgress form={form} dirty={dirty} />
+          <GrantSections>
 
             {/* ── Basic Information ─────────────────────────────── */}
-            <SectionHeader title="Basic Information" />
+            <SectionHeader sectionMarker title="Basic Information" />
             <TextField
               {...f('year')}
               label="Year"
@@ -486,11 +500,11 @@ async function handleSubmit() {
             </div>
 
             {/* ── Financial Details ─────────────────────────────── */}
-            <SectionHeader title="Financial Details" />
+            <SectionHeader sectionMarker title="Financial Details" />
 
             {/* Primary currency — always USD */}
             <div>
-              <label className={labelClass}>Primary Currency</label>
+              <label htmlFor={name} className={labelClass}>Primary Currency</label>
               <input
                 type="text"
                 value="USD"
@@ -558,7 +572,7 @@ async function handleSubmit() {
             </div>
 
             {/* ── Key Dates ─────────────────────────────────────── */}
-            <SectionHeader title="Key Dates" />
+            <SectionHeader sectionMarker title="Key Dates" />
             <DateField
               {...f('grant_receiving_date')}
               label="Grant Receiving Date"
@@ -586,7 +600,7 @@ async function handleSubmit() {
             <DateField {...f('payment_date')} label="Payment Date" />
 
             {/* ── Shipping & Documents ──────────────────────────── */}
-            <SectionHeader title="Shipping & Documents" />
+            <SectionHeader sectionMarker title="Shipping & Documents" />
             <SelectField
               {...f('shipping_documents_status')}
               label="Shipping Documents Status"
@@ -626,7 +640,7 @@ async function handleSubmit() {
             </div>
 
             {/* ── GRN / Receiving ───────────────────────────────── */}
-            <SectionHeader title="GRN / Receiving" />
+            <SectionHeader sectionMarker title="GRN / Receiving" />
             <SelectField
               {...f('grn_receiving_status')}
               label="GRN / Receiving Status"
@@ -651,7 +665,7 @@ async function handleSubmit() {
             </div>
 
             {/* ── Installation & Location ───────────────────────── */}
-            <SectionHeader title="Installation & Location" />
+            <SectionHeader sectionMarker title="Installation & Location" />
             <DateField
               {...f('installation_date')} label="Installation Date"
             />
@@ -673,7 +687,7 @@ async function handleSubmit() {
             />
 
             {/* ── Item Details ──────────────────────────────────── */}
-            <SectionHeader title="Item Details" />
+            <SectionHeader sectionMarker title="Item Details" />
             <TextField
               {...f('item_model')} label="Item Model"
               placeholder="Model name or number"
@@ -694,7 +708,7 @@ async function handleSubmit() {
             </div>
 
             {/* ── Pictures ──────────────────────────────────────── */}
-            <SectionHeader title="Pictures" />
+            <SectionHeader sectionMarker title="Pictures" />
             <SelectField
               {...f('pictures_status')} label="Pictures' Status"
               options={['Yes', 'No', 'Consumable', 'Not applicable']}
@@ -715,12 +729,12 @@ async function handleSubmit() {
             </div>
 
             {/* ── Report ────────────────────────────────────────── */}
-            <SectionHeader title="Report" />
+            <SectionHeader sectionMarker title="Report" />
             <NumberField
               {...f('no_of_beneficiaries')} label="No. of Beneficiaries"
             />
             <div>
-              <label className={labelClass}>Report Status</label>
+              <p className={labelClass}>Report Status</p>
               <div className="mt-2">
                 <StatusBadge status={reportStatus} />
                 <p className="text-xs text-gray-400 mt-1">
@@ -735,7 +749,7 @@ async function handleSubmit() {
               />
             </div>
 
-          </div>
+          </GrantSections>
 
           {/* Submit */}
           <div className="mt-6 pt-4 border-t border-gray-100">
@@ -749,6 +763,7 @@ async function handleSubmit() {
               {loading ? 'Saving to Google Sheets...' : 'Add Grant'}
             </button>
           </div>
+          </fieldset>
         </div>
       </div>
     </div>

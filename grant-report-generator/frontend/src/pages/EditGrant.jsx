@@ -1,3 +1,6 @@
+import GrantSections from '../components/GrantSections'
+import FormProgress from '../components/FormProgress'
+import useUnsavedChanges from '../hooks/useUnsavedChanges'
 import { apiFetch } from '../lib/api'
 import { useState, useEffect, useRef } from 'react'
 import FileUploadField from '../components/FileUploadField'
@@ -21,11 +24,12 @@ function SectionHeader({ title }) {
 function TextField({ name, label, placeholder, required, value, onChange, disabled }) {
   return (
     <div>
-      <label className={labelClass}>
+      <label htmlFor={name} className={labelClass}>
         {label} {required && <span className="text-red-500">*</span>}
       </label>
       <input
         type="text"
+        id={name}
         name={name}
         value={value}
         onChange={onChange}
@@ -43,10 +47,11 @@ function TextField({ name, label, placeholder, required, value, onChange, disabl
 function NumberField({ name, label, readOnly, hint, value, onChange }) {
   return (
     <div>
-      <label className={labelClass}>{label}</label>
+      <label htmlFor={name} className={labelClass}>{label}</label>
       {hint && <p className="text-xs text-brand-500 mb-1">{hint}</p>}
       <input
         type="number"
+        id={name}
         name={name}
         value={value}
         onChange={onChange}
@@ -62,9 +67,10 @@ function NumberField({ name, label, readOnly, hint, value, onChange }) {
 function DateField({ name, label, value, onChange }) {
   return (
     <div>
-      <label className={labelClass}>{label}</label>
+      <label htmlFor={name} className={labelClass}>{label}</label>
       <input
         type="date"
+        id={name}
         name={name}
         value={value}
         onChange={onChange}
@@ -77,10 +83,11 @@ function DateField({ name, label, value, onChange }) {
 function SelectField({ name, label, options, required, value, onChange }) {
   return (
     <div>
-      <label className={labelClass}>
+      <label htmlFor={name} className={labelClass}>
         {label} {required && <span className="text-red-500">*</span>}
       </label>
       <select
+        id={name}
         name={name}
         value={value}
         onChange={onChange}
@@ -98,11 +105,12 @@ function SelectField({ name, label, options, required, value, onChange }) {
 function LinkField({ name, label, value, onChange }) {
   return (
     <div>
-      <label className={labelClass}>{label}</label>
+      <label htmlFor={name} className={labelClass}>{label}</label>
       <div className="flex gap-2">
         <input
           type="url"
-          name={name}
+          id={name}
+        name={name}
           value={value}
           onChange={onChange}
           placeholder="https://"
@@ -128,8 +136,9 @@ function LinkField({ name, label, value, onChange }) {
 function TextareaField({ name, label, value, onChange }) {
   return (
     <div>
-      <label className={labelClass}>{label}</label>
+      <label htmlFor={name} className={labelClass}>{label}</label>
       <textarea
+        id={name}
         name={name}
         value={value}
         onChange={onChange}
@@ -190,6 +199,8 @@ function EditGrant() {
     link_to_utilization_report: '', item_description: '',
   })
 
+  const { dirty, markSaved, setBaseline } = useUnsavedChanges(form, !fetching)
+
   function calcReportStatus(f) {
     const requiredFields = [
       'country', 'chapter', 'grant_number', 'project_type', 'department',
@@ -231,7 +242,7 @@ function EditGrant() {
       if (!response.ok) throw new Error(data.detail || 'Grant not found')
 
       if (!active) return
-      setForm({
+      const loaded = {
         year: data.year || '',
         country: data.country || '',
         chapter: data.chapter || '',
@@ -287,7 +298,9 @@ function EditGrant() {
         report_status: data.report_status || 'Incomplete Information',
         link_to_utilization_report: data.link_to_utilization_report || '',
         item_description: data.item_description || '',
-      })
+      }
+      setForm(loaded)
+      setBaseline(loaded)
 
     } catch (err) {
       if (active) setError(err.message)
@@ -297,7 +310,7 @@ function EditGrant() {
   }
     fetchGrant()
     return () => { active = false }
-  }, [grantNumber])
+  }, [grantNumber, setBaseline])
 
   useEffect(() => {
     let active = true
@@ -387,7 +400,8 @@ function EditGrant() {
       )
       const data = await response.json()
       if (!response.ok) throw new Error(data.detail || 'Failed to update grant')
-      navigate('/')
+      markSaved()
+      navigate('/', { state: { notice: data.audit_warning || 'Grant saved successfully.' } })
     } catch (err) {
       setError(err.message)
     } finally {
@@ -461,10 +475,12 @@ function EditGrant() {
         )}
 
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200/80 p-5 sm:p-8">
-          <div className="grid grid-cols-1 gap-x-6 gap-y-5 sm:grid-cols-2">
+          <fieldset disabled={loading}>
+          <FormProgress form={form} dirty={dirty} />
+          <GrantSections>
 
             {/* ── Basic Information ─────────────────────────────── */}
-            <SectionHeader title="Basic Information" />
+            <SectionHeader sectionMarker title="Basic Information" />
             <SelectField
               {...f('country')} label="Country" required
               options={[
@@ -515,10 +531,10 @@ function EditGrant() {
             </div>
 
             {/* ── Financial Details ─────────────────────────────── */}
-            <SectionHeader title="Financial Details" />
+            <SectionHeader sectionMarker title="Financial Details" />
 
             <div>
-              <label className={labelClass}>Primary Currency</label>
+              <label htmlFor={name} className={labelClass}>Primary Currency</label>
               <input
                 type="text"
                 value="USD"
@@ -579,7 +595,7 @@ function EditGrant() {
             </div>
 
             {/* ── Key Dates ─────────────────────────────────────── */}
-            <SectionHeader title="Key Dates" />
+            <SectionHeader sectionMarker title="Key Dates" />
             <DateField
               {...f('grant_receiving_date')} label="Grant Receiving Date"
             />
@@ -606,7 +622,7 @@ function EditGrant() {
             <DateField {...f('payment_date')} label="Payment Date" />
 
             {/* ── Shipping & Documents ──────────────────────────── */}
-            <SectionHeader title="Shipping & Documents" />
+            <SectionHeader sectionMarker title="Shipping & Documents" />
             <SelectField
               {...f('shipping_documents_status')}
               label="Shipping Documents Status"
@@ -646,7 +662,7 @@ function EditGrant() {
             </div>
 
             {/* ── GRN / Receiving ───────────────────────────────── */}
-            <SectionHeader title="GRN / Receiving" />
+            <SectionHeader sectionMarker title="GRN / Receiving" />
             <SelectField
               {...f('grn_receiving_status')}
               label="GRN / Receiving Status"
@@ -671,7 +687,7 @@ function EditGrant() {
             </div>
 
             {/* ── Installation & Location ───────────────────────── */}
-            <SectionHeader title="Installation & Location" />
+            <SectionHeader sectionMarker title="Installation & Location" />
             <DateField
               {...f('installation_date')} label="Installation Date"
             />
@@ -693,7 +709,7 @@ function EditGrant() {
             />
 
             {/* ── Item Details ──────────────────────────────────── */}
-            <SectionHeader title="Item Details" />
+            <SectionHeader sectionMarker title="Item Details" />
             <TextField
               {...f('item_model')} label="Item Model"
               placeholder="Model name or number"
@@ -715,7 +731,7 @@ function EditGrant() {
             </div>
 
             {/* ── Pictures ──────────────────────────────────────── */}
-            <SectionHeader title="Pictures" />
+            <SectionHeader sectionMarker title="Pictures" />
             <SelectField
               {...f('pictures_status')} label="Pictures' Status"
               options={['Yes', 'No', 'Consumable', 'Not applicable']}
@@ -736,12 +752,12 @@ function EditGrant() {
             </div>
 
             {/* ── Report ────────────────────────────────────────── */}
-            <SectionHeader title="Report" />
+            <SectionHeader sectionMarker title="Report" />
             <NumberField
               {...f('no_of_beneficiaries')} label="No. of Beneficiaries"
             />
             <div>
-              <label className={labelClass}>Report Status</label>
+              <p className={labelClass}>Report Status</p>
               <div className="mt-2">
                 <StatusBadge status={reportStatus} />
                 <p className="text-xs text-gray-400 mt-1">
@@ -756,7 +772,7 @@ function EditGrant() {
               />
             </div>
 
-          </div>
+          </GrantSections>
 
           {/* Submit */}
           <div className="mt-6 pt-4 border-t border-gray-100">
@@ -770,6 +786,7 @@ function EditGrant() {
               {loading ? 'Saving changes...' : 'Save Changes'}
             </button>
           </div>
+          </fieldset>
         </div>
       </div>
     </div>

@@ -7,7 +7,7 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Depends
 from starlette.background import BackgroundTask
-from api.auth import require_user
+from api.auth import require_user, require_editor, user_role
 import tempfile
 import shutil
 import re
@@ -46,6 +46,49 @@ from services.template_report import (
 
 
 router = APIRouter(prefix="/api", tags=["Grants"], dependencies=[Depends(require_user)])
+
+
+@router.get('/me')
+def current_user(user=Depends(require_user)):
+    return {'id': str(user.id), 'role': user_role(user)}
+
+
+@router.get('/audit')
+def grant_audit(grant_number: str | None = None, limit: int = 100, offset: int = 0):
+    if not 1 <= limit <= 100 or offset < 0:
+        raise HTTPException(422, 'Invalid page size or offset.')
+    try:
+        return supabase_service.get_grant_audit(grant_number, limit, offset)
+    except Exception as error:
+        logging.exception('Could not load audit trail')
+        raise HTTPException(503, 'Audit trail is unavailable.') from error
+
+
+def _audited_write(user, action, grant_number, before, after, write):
+    # Persist intent before Sheets, which cannot share a database transaction.
+    try:
+        audit_id = supabase_service.start_audit(user=user, action=action,
+            grant_number=grant_number, before=before, after=after)
+    except Exception as error:
+        logging.exception('Could not create audit entry')
+        raise HTTPException(503, 'Could not record the change. No grant was written.') from error
+    try:
+        write()
+    except Exception as error:
+        # Network failures can happen after Google has accepted a write.
+        # Keep the intent for reconciliation rather than claiming rollback.
+        try:
+            supabase_service.finish_audit(audit_id, 'unconfirmed')
+        except Exception:
+            logging.exception('Could not update audit status')
+        logging.exception('Grant write could not be confirmed')
+        raise HTTPException(503, 'The save could not be confirmed. Refresh the grant before retrying.') from error
+    try:
+        supabase_service.finish_audit(audit_id, 'completed')
+        return None
+    except Exception:
+        logging.exception('Saved grant has a pending audit status')
+        return 'Grant saved. Its audit entry is pending confirmation; do not submit it again.'
 
 
 # ── Request body model — 50 columns ────────────────────────────────────────
@@ -172,7 +215,7 @@ def get_grant(grant_number: str) -> dict:
 
 # ── POST /api/grants ─────────────────────────────────────────────────────────
 @router.post("/grants", status_code=201)
-def add_grant(payload: GrantPayload) -> dict:
+def add_grant(payload: GrantPayload, user=Depends(require_editor)) -> dict:
     """Add a new grant row to the Google Sheet."""
     grant_data = payload.model_dump()
 
@@ -190,20 +233,19 @@ def add_grant(payload: GrantPayload) -> dict:
     except (GoogleSheetsWriteError, WriteConfigurationError) as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
 
-    try:
-        append_grant(grant_data)
-    except (GoogleSheetsWriteError, WriteConfigurationError) as error:
-        raise HTTPException(status_code=503, detail=str(error)) from error
+    warning = _audited_write(user, 'create', grant_data['grant_number'], {}, grant_data,
+                             lambda: append_grant(grant_data))
 
     return {
         "message": "Grant added successfully.",
-        "grant_number": grant_data["grant_number"]
+        "grant_number": grant_data["grant_number"],
+        "audit_warning": warning,
     }
 
 
 # ── PUT /api/grants/{grant_number} ───────────────────────────────────────────
 @router.put("/grants/{grant_number}")
-def edit_grant(grant_number: str, payload: GrantPayload) -> dict:
+def edit_grant(grant_number: str, payload: GrantPayload, user=Depends(require_editor)) -> dict:
     """Update an existing grant row in the Google Sheet."""
     grant_data = payload.model_dump()
     if grant_data['grant_number'] != grant_number:
@@ -214,14 +256,14 @@ def edit_grant(grant_number: str, payload: GrantPayload) -> dict:
     except GrantDataValidationError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
 
-    try:
-        update_grant(grant_number, grant_data)
-    except (GoogleSheetsWriteError, WriteConfigurationError) as error:
-        raise HTTPException(status_code=503, detail=str(error)) from error
+    before = _get_single_grant(grant_number)
+    warning = _audited_write(user, 'update', grant_number, before, grant_data,
+                             lambda: update_grant(grant_number, grant_data))
 
     return {
         "message": "Grant updated successfully.",
-        "grant_number": grant_number
+        "grant_number": grant_number,
+        "audit_warning": warning,
     }
 
 

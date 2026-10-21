@@ -108,4 +108,23 @@ def get_report_history() -> list[dict[str, Any]]:
     return response.data
 
 
-# NEXT STEP: Build sheets_reader.py to fetch and clean rows from the Grants tab.
+def start_audit(*, user, action: str, grant_number: str, before: dict, after: dict) -> str:
+    changes = {key: {'before': before.get(key), 'after': value}
+               for key, value in after.items() if before.get(key) != value}
+    response = get_supabase_client().table('grant_audit').insert({
+        'actor_id': str(user.id), 'actor_email': getattr(user, 'email', None),
+        'action': action, 'grant_number': grant_number, 'changes': changes,
+        'status': 'pending',
+    }).execute()
+    return str(response.data[0]['id'])
+
+
+def finish_audit(audit_id: str, status: str) -> None:
+    get_supabase_client().table('grant_audit').update({'status': status}).eq('id', audit_id).execute()
+
+
+def get_grant_audit(grant_number: str | None = None, limit: int = 100, offset: int = 0) -> list:
+    query = get_supabase_client().table('grant_audit').select('*').order('created_at', desc=True).order('id')
+    if grant_number:
+        query = query.eq('grant_number', grant_number)
+    return query.range(offset, offset + limit - 1).execute().data

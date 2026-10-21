@@ -1,41 +1,14 @@
+import { useAccess } from '../context/Access'
+import useSavedViews from '../hooks/useSavedViews'
+import { sortRecords, paginateRecords, SORT_FIELDS } from '../lib/records'
+import DeferredAnalytics from '../components/DeferredAnalytics'
 import { apiFetch } from '../lib/api'
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { supabase } from '../supabase'
-import {
-  PieChart, Pie, Cell, Tooltip, ResponsiveContainer,
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, LabelList,
-  ComposedChart, Area
-} from 'recharts'
-import {
-  ComposableMap, Geographies, Geography, ZoomableGroup
-} from 'react-simple-maps'
-
 // ── Constants ───────────────────────────────────────────────────────────────
 const CHAPTERS = ['FOIHUS', 'IDF', 'TIH UAE', 'IHN UK', 'FOIH Germany', 'FOIH Switzerland']
 const COUNTRIES = ['United States', 'Canada', 'United Kingdom', 'Germany', 'Switzerland', 'UAE']
-const GEO_URL = 'https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json'
-
-// Map geometry names -> our country names
-const GEO_NAME_MAP = {
-  'United States of America': 'United States',
-  'United Kingdom': 'United Kingdom',
-  'Germany': 'Germany',
-  'Switzerland': 'Switzerland',
-  'United Arab Emirates': 'UAE',
-  'Canada': 'Canada',
-}
-
-// Chart colors. Status colors are the same everywhere in the app.
-const STATUS_COLORS = {
-  'Complete': '#059669',
-  'Pending': '#d97706',
-  'Incomplete Information': '#e11d48',
-}
-const PROJECT_COLORS = { 'Expansion': '#6563cf', 'Non-Expansion': '#c4c7ed' }
-const BRAND_LINE = '#6563cf'
-const AMBER_LINE = '#d97706'
-
 const ALL_SECTIONS_ON = {
   overview: true, financial: true, dates: true,
   shipping: true, grn: true, location: true,
@@ -56,12 +29,6 @@ const SECTION_LABELS = [
   { key: 'report', label: 'Report status' },
 ]
 
-const TOOLTIP_STYLE = {
-  borderRadius: '8px', border: '1px solid #e2e8f0',
-  boxShadow: '0 6px 20px rgba(15,38,48,0.10)', fontSize: '12px', padding: '8px 12px',
-}
-
-// ── Small helpers ───────────────────────────────────────────────────────────
 const num = v => parseFloat(v) || 0
 const usd = v => (v ? `$${Number(v).toLocaleString()}` : '—')
 const usd0 = v => `$${v.toLocaleString(undefined, { maximumFractionDigits: 0 })}`
@@ -134,31 +101,6 @@ function StatusPill({ value }) {
   )
 }
 
-function Card({ title, subtitle, action, children, className = '' }) {
-  return (
-    <section className={`workspace-card rounded-2xl border border-slate-200/80 bg-white ${className}`}>
-      {(title || action) && (
-        <header className="flex items-start justify-between gap-4 px-5 pt-5">
-          <div>
-            <h3 className="text-[15px] font-semibold text-slate-900">{title}</h3>
-            {subtitle && <p className="mt-0.5 text-sm text-slate-500">{subtitle}</p>}
-          </div>
-          {action}
-        </header>
-      )}
-      <div className="p-5">{children}</div>
-    </section>
-  )
-}
-
-function Empty({ children, height = 'h-40' }) {
-  return (
-    <div className={`flex ${height} items-center justify-center rounded-lg bg-slate-50 px-6 text-center text-sm text-slate-400`}>
-      {children}
-    </div>
-  )
-}
-
 function FilterSelect({ value, onChange, placeholder, options }) {
   return (
     <select
@@ -172,74 +114,6 @@ function FilterSelect({ value, onChange, placeholder, options }) {
   )
 }
 
-function DonutCard({ title, subtitle, data, colorFor }) {
-  const total = data.reduce((s, d) => s + d.value, 0)
-  return (
-    <Card title={title} subtitle={subtitle}>
-      {data.length === 0 ? <Empty>No data yet</Empty> : (
-        <div className="flex items-center gap-6">
-          <div className="relative h-44 w-44 shrink-0">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie data={data} dataKey="value" innerRadius={54} outerRadius={80}
-                     paddingAngle={2} strokeWidth={0}>
-                  {data.map(d => <Cell key={d.name} fill={colorFor(d.name)} />)}
-                </Pie>
-                <Tooltip contentStyle={TOOLTIP_STYLE} />
-              </PieChart>
-            </ResponsiveContainer>
-            <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-              <span className="text-2xl font-semibold tabular-nums text-slate-900">{total}</span>
-              <span className="text-xs text-slate-500">grants</span>
-            </div>
-          </div>
-          <ul className="flex-1 space-y-3">
-            {data.map(d => (
-              <li key={d.name} className="flex items-center justify-between gap-3 text-sm">
-                <span className="flex items-center gap-2 text-slate-600">
-                  <span className="h-2.5 w-2.5 rounded-full" style={{ background: colorFor(d.name) }} />
-                  {d.name}
-                </span>
-                <span className="font-semibold tabular-nums text-slate-900">{d.value}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-    </Card>
-  )
-}
-
-// ── Map helpers ─────────────────────────────────────────────────────────────
-function computeCountryStats(grants) {
-  const values = {}, counts = {}, chapters = {}
-  grants.forEach(g => {
-    const country = g.country || 'Unknown'
-    values[country] = (values[country] || 0) + num(g.total_grant_amount_usd)
-    counts[country] = (counts[country] || 0) + 1
-    if (!chapters[country]) chapters[country] = new Set()
-    if (g.chapter) chapters[country].add(g.chapter)
-  })
-  return { values, counts, chapters, max: Math.max(...Object.values(values), 1) }
-}
-
-function mapFill(geoName, stats, activeChapter) {
-  const ourName = GEO_NAME_MAP[geoName]
-  if (!ourName) return '#ebedf3'
-  if (activeChapter) {
-    const ch = stats.chapters[ourName]
-    if (!ch || !ch.has(activeChapter)) return '#ebedf3'
-  }
-  const value = stats.values[ourName] || 0
-  if (value === 0) return '#dbddf0'
-  const intensity = value / stats.max
-  if (intensity > 0.7) return '#403e94'
-  if (intensity > 0.4) return '#6563cf'
-  if (intensity > 0.1) return '#9094e2'
-  return '#c4c7ed'
-}
-
-// ── Detail modal pieces ─────────────────────────────────────────────────────
 function DetailSection({ title, children }) {
   return (
     <section>
@@ -296,6 +170,16 @@ function Note({ title, tone = 'slate', children }) {
 // ── Main component ──────────────────────────────────────────────────────────
 function Dashboard({ session }) {
   const navigate = useNavigate()
+  const location = useLocation()
+  const { role } = useAccess()
+  const canEdit = ['editor', 'admin'].includes(role)
+  const saved = useSavedViews(session.user.id)
+  const [viewName, setViewName] = useState('')
+  const [selectedView, setSelectedView] = useState('')
+  const [sortField, setSortField] = useState('grant_number')
+  const [sortDirection, setSortDirection] = useState('asc')
+  const [pageSize, setPageSize] = useState(25)
+  const [paging, setPaging] = useState({ key: '', page: 1 })
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -304,8 +188,6 @@ function Dashboard({ session }) {
   const [detailGrant, setDetailGrant] = useState(null)
   const [activeNav, setActiveNav] = useState('dashboard')
   const [activeChapter, setActiveChapter] = useState('')
-  const [mapZoom, setMapZoom] = useState({ coordinates: [10, 30], zoom: 1 })
-  const [mapTooltip, setMapTooltip] = useState(null)
   const [selectedSections, setSelectedSections] = useState(ALL_SECTIONS_ON)
 
   // Records filters
@@ -383,46 +265,6 @@ function Dashboard({ session }) {
   )
   const shippingIssues = discrepancies.length
 
-  function countBy(getKey, order) {
-    const counts = {}
-    filteredGrants.forEach(g => {
-      const k = getKey(g)
-      if (k !== undefined && k !== null) counts[k] = (counts[k] || 0) + 1
-    })
-    const names = order || Object.keys(counts)
-    return names
-      .map(name => ({ name, value: counts[name] || 0 }))
-      .filter(d => d.value > 0)
-  }
-
-  const projectTypeData = countBy(g => g.project_type, ['Expansion', 'Non-Expansion'])
-  const reportStatusData = countBy(g => g.report_status, ['Complete', 'Pending', 'Incomplete Information'])
-  const countryData = countBy(g => g.country || 'Unknown').sort((a, b) => b.value - a.value)
-
-  function getActivityData() {
-    const dated = filteredGrants
-      .filter(g => g.grant_receiving_date)
-      .map(g => ({ date: g.grant_receiving_date, payment: num(g.current_payment_usd) }))
-      .sort((a, b) => new Date(a.date) - new Date(b.date))
-    if (dated.length === 0) return []
-    const grouped = {}
-    dated.forEach(({ date, payment }) => {
-      if (!grouped[date]) grouped[date] = { date, count: 0, payment: 0 }
-      grouped[date].count += 1
-      grouped[date].payment += payment
-    })
-    let cumCount = 0, cumPayment = 0
-    return Object.values(grouped)
-      .sort((a, b) => new Date(a.date) - new Date(b.date))
-      .map(d => {
-        cumCount += d.count
-        cumPayment += d.payment
-        return { date: d.date, grants: cumCount, payment: Math.round(cumPayment) }
-      })
-  }
-  const activityData = getActivityData()
-  const mapStats = computeCountryStats(filteredGrants)
-
   const q = filterSearch.toLowerCase()
   const recordRows = (data?.grants || [])
     .filter(g => !filterCountry || g.country === filterCountry)
@@ -434,12 +276,30 @@ function Dashboard({ session }) {
       g.grant_number?.toLowerCase().includes(q) ||
       g.supplier?.toLowerCase().includes(q) ||
       g.item?.toLowerCase().includes(q))
+  const filterKey = JSON.stringify([filterCountry, filterChapter, filterDept, filterPayment, filterReport, filterSearch, sortField, sortDirection, pageSize])
+  const sortedRows = sortRecords(recordRows, sortField, sortDirection)
+  const pagination = paginateRecords(sortedRows, paging.key === filterKey ? paging.page : 1, pageSize)
+  function applyView(name) {
+    setSelectedView(name)
+    const view = saved.views.find(view => view.name === name)
+    if (!view) return
+    const f = view.filters
+    setFilterCountry(f.country || ''); setFilterChapter(f.chapter || ''); setFilterDept(f.department || '')
+    setFilterPayment(f.payment || ''); setFilterReport(f.report || ''); setFilterSearch(f.search || '')
+    setSortField(SORT_FIELDS.includes(f.sortField) ? f.sortField : 'grant_number')
+    setSortDirection(f.sortDirection === 'desc' ? 'desc' : 'asc')
+  }
+  function saveView() {
+    if (saved.save(viewName, { country: filterCountry, chapter: filterChapter, department: filterDept, payment: filterPayment, report: filterReport, search: filterSearch, sortField, sortDirection })) {
+      setSelectedView(viewName.trim().slice(0, 60)); setViewName('')
+    }
+  }
   const anyFilter = filterCountry || filterChapter || filterDept ||
     filterPayment || filterReport || filterSearch
 
   function clearFilters() {
     setFilterCountry(''); setFilterChapter(''); setFilterDept('')
-    setFilterPayment(''); setFilterReport(''); setFilterSearch('')
+    setFilterPayment(''); setFilterReport(''); setFilterSearch(''); setSelectedView('')
   }
 
   const NAV = [
@@ -463,6 +323,7 @@ function Dashboard({ session }) {
           <p className="mt-0.5 text-xs text-slate-400">International grants team</p>
         </div>
         <nav className="flex-1 space-y-1.5 px-4" aria-label="Main navigation">
+          <button onClick={() => navigate('/audit')} className="flex w-full items-center gap-3 rounded-xl px-3.5 py-3 text-sm font-medium text-slate-500 hover:bg-slate-50"><Icon name="history" className="h-[18px] w-[18px]" />Grant activity</button>
           <p className="mb-3 px-3 text-[10px] font-semibold tracking-[0.16em] text-slate-400">WORKSPACE</p>
           {NAV.map(item => (
             <button key={item.id} onClick={() => setActiveNav(item.id)} aria-current={activeNav === item.id ? 'page' : undefined}
@@ -472,7 +333,7 @@ function Dashboard({ session }) {
             </button>
           ))}
           <button onClick={() => navigate('/history')} className="flex w-full items-center gap-3 rounded-xl px-3.5 py-3 text-sm font-medium text-slate-500 hover:bg-slate-50 hover:text-slate-900"><Icon name="history" className="h-[18px] w-[18px]" />Report history</button>
-          <button onClick={() => navigate('/add-grant')} className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-brand-600 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-brand-700"><Icon name="plus" className="h-4 w-4" />Add new grant</button>
+          <button disabled={!canEdit} title={!canEdit ? 'Editor access required' : undefined} onClick={() => navigate('/add-grant')} className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-brand-600 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-brand-700"><Icon name="plus" className="h-4 w-4" />Add new grant</button>
         </nav>
         <div className="m-4 rounded-xl border border-slate-200/80 p-3.5">
           <div className="flex items-center gap-2.5"><span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-100 text-xs font-semibold text-brand-700">{session.user.email?.[0]?.toUpperCase() || 'G'}</span><div className="min-w-0"><p className="text-xs font-semibold text-slate-700">Your workspace</p><p className="truncate text-[11px] text-slate-400">{session.user.email}</p></div></div>
@@ -502,6 +363,9 @@ function Dashboard({ session }) {
         </div>
 
         <div className="mx-auto max-w-[1400px] p-4 md:p-8 lg:px-10">
+          {location.state?.notice && <p role="status" className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">{location.state.notice}</p>}
+          {!canEdit && <p className="mb-4 rounded-xl border border-brand-100 bg-brand-50 p-4 text-sm text-brand-700">View-only access: you can review grants, activity, and reports. An administrator can grant editing access.</p>}
+          <button onClick={() => navigate('/audit')} className="mb-3 text-xs font-medium text-brand-600 md:hidden">Grant activity</button>
           <div className="mb-8 flex flex-wrap items-center justify-between gap-3 border-b border-slate-200/80 pb-5">
             <p className="text-xs font-medium text-slate-400">Workspace <span className="mx-2 text-slate-300">/</span><span className="text-slate-700">{activeNav === 'dashboard' ? 'Overview' : 'Grant records'}</span></p>
             <div className="flex items-center gap-3">
@@ -611,176 +475,7 @@ function Dashboard({ session }) {
                     </section>
                   )}
 
-                  {/* Donuts */}
-                  <div className="mb-6 grid gap-6 lg:grid-cols-2">
-                    <DonutCard
-                      title="Project type" subtitle="Expansion and non-expansion grants"
-                      data={projectTypeData} colorFor={n => PROJECT_COLORS[n] || '#94a3b8'}
-                    />
-                    <DonutCard
-                      title="Report status" subtitle={`${totalCount} grants in total`}
-                      data={reportStatusData} colorFor={n => STATUS_COLORS[n] || '#94a3b8'}
-                    />
-                  </div>
-
-                  {/* Map */}
-                  <Card
-                    className="mb-6"
-                    title="Where grants are deployed"
-                    subtitle="Darker countries hold more grant value. Scroll to zoom, drag to move."
-                    action={
-                      <button
-                        onClick={() => setMapZoom({ coordinates: [0, 20], zoom: 1 })}
-                        className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:bg-slate-50"
-                      >
-                        Reset view
-                      </button>
-                    }
-                  >
-                    <div className="relative overflow-hidden rounded-lg bg-brand-50/60" style={{ height: '400px' }}>
-                      <ComposableMap
-                        projection="geoMercator"
-                        projectionConfig={{ scale: 130, center: [10, 30] }}
-                        style={{ width: '100%', height: '100%' }}
-                      >
-                        <ZoomableGroup
-                          zoom={mapZoom.zoom}
-                          center={mapZoom.coordinates}
-                          onMoveEnd={({ coordinates, zoom }) => setMapZoom({ coordinates, zoom })}
-                          minZoom={0.5} maxZoom={8}
-                        >
-                          <Geographies geography={GEO_URL}>
-                            {({ geographies }) => geographies.map(geo => {
-                              const geoName = geo.properties.name
-                              const ourName = GEO_NAME_MAP[geoName]
-                              const isHighlighted = ourName && mapStats.values[ourName] !== undefined
-                              return (
-                                <Geography
-                                  key={geo.rsmKey}
-                                  geography={geo}
-                                  fill={mapFill(geoName, mapStats, activeChapter)}
-                                  stroke="#ffffff"
-                                  strokeWidth={0.5}
-                                  style={{
-                                    default: { outline: 'none' },
-                                    hover: {
-                                      fill: isHighlighted ? '#d97706' : '#d1dbe1',
-                                      outline: 'none',
-                                      cursor: isHighlighted ? 'pointer' : 'default',
-                                    },
-                                    pressed: { outline: 'none' },
-                                  }}
-                                  onMouseEnter={() => {
-                                    if (ourName && mapStats.counts[ourName]) {
-                                      setMapTooltip({
-                                        name: ourName,
-                                        grants: mapStats.counts[ourName],
-                                        value: mapStats.values[ourName] || 0,
-                                        chapters: mapStats.chapters[ourName]
-                                          ? [...mapStats.chapters[ourName]].join(', ') : '—',
-                                      })
-                                    }
-                                  }}
-                                  onMouseLeave={() => setMapTooltip(null)}
-                                />
-                              )
-                            })}
-                          </Geographies>
-                        </ZoomableGroup>
-                      </ComposableMap>
-
-                      {mapTooltip && (
-                        <div className="pointer-events-none absolute right-4 top-4 min-w-52 rounded-lg border border-slate-200 bg-white p-4 shadow-lg">
-                          <p className="mb-1.5 text-sm font-semibold text-slate-900">{mapTooltip.name}</p>
-                          <p className="text-xs text-slate-500">Chapter: <span className="font-medium text-slate-700">{mapTooltip.chapters}</span></p>
-                          <p className="text-xs text-slate-500">Grants: <span className="font-medium text-slate-700">{mapTooltip.grants}</span></p>
-                          <p className="text-xs text-slate-500">Total value: <span className="font-semibold text-brand-700">{usd0(mapTooltip.value)}</span></p>
-                        </div>
-                      )}
-
-                      <div className="absolute bottom-4 left-4 flex items-center gap-2 rounded-md bg-white/90 px-2.5 py-1.5 text-xs text-slate-500">
-                        <span>Lower</span>
-                        {['#c4c7ed', '#9094e2', '#6563cf', '#403e94'].map(c => (
-                          <span key={c} className="h-2.5 w-5 rounded-sm" style={{ background: c }} />
-                        ))}
-                        <span>Higher</span>
-                      </div>
-                    </div>
-                  </Card>
-
-                  {/* Records by country */}
-                  <Card className="mb-6" title="Records by country" subtitle="Number of grants per country">
-                    {countryData.length === 0 ? <Empty>No data yet</Empty> : (
-                      <ResponsiveContainer width="100%" height={220}>
-                        <BarChart data={countryData} margin={{ top: 18, right: 10, left: -20, bottom: 30 }} barSize={34}>
-                          <CartesianGrid strokeDasharray="3 3" stroke="#eef2f5" vertical={false} />
-                          <XAxis dataKey="name" tick={{ fontSize: 12, fill: '#5b6b78' }}
-                                 angle={-20} textAnchor="end" interval={0} axisLine={false} tickLine={false} />
-                          <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: '#94a3b8' }}
-                                 axisLine={false} tickLine={false} />
-                          <Tooltip contentStyle={TOOLTIP_STYLE} cursor={{ fill: 'rgba(31,86,104,0.05)' }} />
-                          <Bar dataKey="value" radius={[5, 5, 0, 0]} fill="#6563cf">
-                            <LabelList dataKey="value" position="top"
-                                       style={{ fontSize: '12px', fill: '#475569', fontWeight: 600 }} />
-                          </Bar>
-                        </BarChart>
-                      </ResponsiveContainer>
-                    )}
-                  </Card>
-
-                  {/* Activity */}
-                  <Card
-                    title="Grant activity over time"
-                    subtitle="Running totals by grant receiving date"
-                    action={
-                      <div className="flex gap-4 text-xs text-slate-500">
-                        <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full" style={{ background: BRAND_LINE }} />Grants</span>
-                        <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full" style={{ background: AMBER_LINE }} />Payments (USD)</span>
-                      </div>
-                    }
-                  >
-                    {activityData.length < 2 ? (
-                      <Empty height="h-48">Add grants with different receiving dates to see activity over time.</Empty>
-                    ) : (
-                      <ResponsiveContainer width="100%" height={270}>
-                        <ComposedChart data={activityData} margin={{ top: 10, right: 20, left: 0, bottom: 10 }}>
-                          <defs>
-                            <linearGradient id="grantsGrad" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="5%" stopColor={BRAND_LINE} stopOpacity={0.18} />
-                              <stop offset="95%" stopColor={BRAND_LINE} stopOpacity={0} />
-                            </linearGradient>
-                            <linearGradient id="paymentGrad" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="5%" stopColor={AMBER_LINE} stopOpacity={0.14} />
-                              <stop offset="95%" stopColor={AMBER_LINE} stopOpacity={0} />
-                            </linearGradient>
-                          </defs>
-                          <CartesianGrid strokeDasharray="3 3" stroke="#eef2f5" vertical={false} />
-                          <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#94a3b8' }}
-                                 axisLine={false} tickLine={false} interval="preserveStartEnd"
-                                 tickFormatter={formatDate} />
-                          <YAxis yAxisId="left" orientation="left" allowDecimals={false}
-                                 tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} width={30} />
-                          <YAxis yAxisId="right" orientation="right"
-                                 tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} width={50}
-                                 tickFormatter={v => `$${(v / 1000).toFixed(0)}k`} />
-                          <Tooltip
-                            contentStyle={TOOLTIP_STYLE}
-                            labelFormatter={formatDate}
-                            formatter={(value, name) => [
-                              name === 'payment' ? `$${value.toLocaleString()}` : value,
-                              name === 'payment' ? 'Payments (USD)' : 'Grants',
-                            ]}
-                          />
-                          <Area yAxisId="left" type="monotone" dataKey="grants" stroke={BRAND_LINE} strokeWidth={2.5}
-                                fill="url(#grantsGrad)" dot={{ fill: BRAND_LINE, r: 4, strokeWidth: 0 }}
-                                activeDot={{ r: 6, fill: BRAND_LINE, strokeWidth: 0 }} />
-                          <Area yAxisId="right" type="monotone" dataKey="payment" stroke={AMBER_LINE} strokeWidth={2.5}
-                                fill="url(#paymentGrad)" dot={{ fill: AMBER_LINE, r: 4, strokeWidth: 0 }}
-                                activeDot={{ r: 6, fill: AMBER_LINE, strokeWidth: 0 }} />
-                        </ComposedChart>
-                      </ResponsiveContainer>
-                    )}
-                  </Card>
+                  <DeferredAnalytics filteredGrants={filteredGrants} activeChapter={activeChapter} />
                 </>
               )}
             </>
@@ -797,7 +492,7 @@ function Dashboard({ session }) {
                   </p>
                 </div>
                 <button
-                  onClick={() => navigate('/add-grant')}
+                  disabled={!canEdit} title={!canEdit ? 'Editor access required' : undefined} onClick={() => navigate('/add-grant')}
                   className="flex items-center gap-2 rounded-lg bg-brand-700 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-brand-800"
                 >
                   <Icon name="plus" className="h-4 w-4" /> Add grant
@@ -828,6 +523,22 @@ function Dashboard({ session }) {
                 </div>
               )}
 
+              {data && <div className="mb-5 space-y-3 rounded-xl border border-slate-200 bg-white p-4">
+                <div className="flex flex-wrap items-center gap-3">
+                  <label className="text-xs text-slate-500">Sort by <select aria-label="Sort records by" value={sortField} onChange={event => setSortField(event.target.value)} className="ml-2 rounded-lg border border-slate-200 px-2 py-2 text-sm">{SORT_FIELDS.map(field => <option key={field} value={field}>{field.replaceAll('_', ' ')}</option>)}</select></label>
+                  <button onClick={() => setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc')} className="rounded-lg border border-slate-200 px-3 py-2 text-xs">{sortDirection === 'asc' ? 'Ascending' : 'Descending'}</button>
+                  <label className="text-xs text-slate-500">Rows <select aria-label="Rows per page" value={pageSize} onChange={event => setPageSize(Number(event.target.value))} className="ml-2 rounded-lg border border-slate-200 px-2 py-2 text-sm">{[10, 25, 50, 100].map(size => <option key={size}>{size}</option>)}</select></label>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <select aria-label="Saved views" value={selectedView} onChange={event => applyView(event.target.value)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm"><option value="">Saved views</option>{saved.views.map(view => <option key={view.name} value={view.name}>{view.name}</option>)}</select>
+                  <input aria-label="New saved view name" maxLength={60} value={viewName} onChange={event => setViewName(event.target.value)} placeholder="Name this view" className="min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+                  <button onClick={saveView} className="rounded-lg bg-brand-50 px-3 py-2 text-xs font-medium text-brand-700">Save view</button>
+                  <button onClick={() => { setFilterReport('Pending'); setSelectedView('') }} className="rounded-lg border border-slate-200 px-3 py-2 text-xs">Pending reports</button>
+                  {selectedView && <button onClick={() => { if (saved.remove(selectedView)) setSelectedView('') }} className="px-2 text-xs text-rose-600">Delete view</button>}
+                </div>
+                <p className="text-xs text-slate-400">Views are saved for your account in this browser. Saving an existing name replaces that view.</p>
+                {saved.error && <p role="alert" className="text-xs text-rose-600">{saved.error}</p>}
+              </div>}
               {loading && <p className="py-12 text-center text-slate-400">Loading grants…</p>}
               {error && !data && (
                 <div role="alert" className="mb-6 flex items-center justify-between gap-4 rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
@@ -840,7 +551,7 @@ function Dashboard({ session }) {
                 <section className="overflow-hidden rounded-xl border border-slate-200 bg-white">
                   <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3.5">
                     <p className="text-sm text-slate-600">
-                      Showing <span className="font-semibold text-slate-900">{recordRows.length}</span> of {data.grants.length}
+                      Showing <span className="font-semibold text-slate-900">{pagination.start}-{pagination.end}</span> of {recordRows.length} matches ({data.grants.length} total)
                     </p>
                     <button onClick={fetchGrants} className="text-sm font-medium text-brand-700 hover:text-brand-900">
                       Refresh
@@ -882,7 +593,7 @@ function Dashboard({ session }) {
                               </td>
                             </tr>
                           )}
-                          {recordRows.map(grant => (
+                          {pagination.rows.map(grant => (
                             <tr
                               key={grant.grant_number}
                               className="cursor-pointer transition hover:bg-brand-50/60"
@@ -905,7 +616,7 @@ function Dashboard({ session }) {
                               <td className="whitespace-nowrap px-4 py-3 text-right" onClick={e => e.stopPropagation()}>
                                 <div className="flex justify-end gap-2">
                                   <button
-                                    onClick={() => navigate(`/edit-grant/${encodeURIComponent(grant.grant_number)}`)}
+                                    disabled={!canEdit} title={!canEdit ? 'Editor access required' : undefined} onClick={() => navigate(`/edit-grant/${encodeURIComponent(grant.grant_number)}`)}
                                     className="rounded-md border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 transition hover:bg-slate-50"
                                   >
                                     Edit
@@ -924,6 +635,10 @@ function Dashboard({ session }) {
                       </table>
                     </div>
                   )}
+                  <div className="flex items-center justify-between border-t border-slate-200 px-5 py-4 text-sm">
+                    <span className="text-slate-500">Page {pagination.page} of {pagination.pages}</span>
+                    <div className="flex gap-4"><button disabled={pagination.page <= 1} onClick={() => setPaging({ key: filterKey, page: pagination.page - 1 })} className="text-brand-700 disabled:opacity-30">Previous</button><button disabled={pagination.page >= pagination.pages} onClick={() => setPaging({ key: filterKey, page: pagination.page + 1 })} className="text-brand-700 disabled:opacity-30">Next</button></div>
+                  </div>
                 </section>
               )}
             </>
@@ -949,7 +664,7 @@ function Dashboard({ session }) {
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
                   <button
-                    onClick={() => { setDetailGrant(null); navigate(`/edit-grant/${encodeURIComponent(g.grant_number)}`) }}
+                    disabled={!canEdit} title={!canEdit ? 'Editor access required' : undefined} onClick={() => { setDetailGrant(null); navigate(`/edit-grant/${encodeURIComponent(g.grant_number)}`) }}
                     className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
                   >
                     Edit

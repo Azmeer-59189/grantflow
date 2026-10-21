@@ -22,7 +22,7 @@
   body { margin: 0; background: var(--color-canvas); color: var(--color-ink); font-family: var(--font-sans); }
   :focus-visible { outline: 3px solid var(--color-brand-400); outline-offset: 3px; }
   button { cursor: pointer; }
-  button:disabled { cursor: not-allowed; }
+  button:disabled { cursor: not-allowed; opacity: 0.5; }
   button, a, input, select, textarea { transition-duration: 160ms; }
   input, select, textarea { accent-color: var(--color-brand-600); }
   ::selection { background: var(--color-brand-100); color: var(--color-brand-950); }
