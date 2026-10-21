@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
 import { apiFetch } from '../lib/api'
+import AppShell from '../components/AppShell'
+import { Alert, EmptyState, Skeleton } from '../components/ui'
 
 export default function History() {
   const [rows, setRows] = useState(null)
@@ -16,23 +17,37 @@ export default function History() {
       .catch(error => { if (active) setError(error.message) })
     return () => { active = false }
   }, [])
+  const th = 'px-5 py-3 text-xs font-semibold text-slate-500'
   return (
-    <main className="mx-auto max-w-5xl px-4 py-10 sm:px-8">
-      <Link to="/" className="text-sm font-medium text-brand-600 hover:text-brand-800">Back to dashboard</Link>
-      <h1 className="my-6 text-3xl font-semibold tracking-tight">Report history</h1>
-      {error && <p role="alert">{error}</p>}
-      {!error && rows === null && <p>Loading history...</p>}
-      {rows?.length === 0 && <p>No reports have been generated yet.</p>}
-      {rows?.length > 0 && <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white p-3 shadow-sm"><table className="w-full text-left text-sm">
-        <thead className="bg-slate-50 text-xs text-slate-500"><tr><th className="p-3">Generated</th><th>Format</th><th>Grants</th><th>Payment (USD)</th><th>Beneficiaries</th></tr></thead>
-        <tbody>{rows.map(row => <tr key={row.id} className="border-t border-slate-100 hover:bg-brand-50/50">
-          <td className="p-3">{new Date(row.generated_at).toLocaleString()}</td>
-          <td>{row.format}</td><td>{row.row_count}</td>
-          <td>{Number(row.total_received).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
-          <td>{row.total_beneficiaries}</td>
-        </tr>)}</tbody>
-      </table></div>}
-      <p className="mt-6 text-sm text-slate-500">History records report generation. Downloaded files are temporary and are not retained.</p>
-    </main>
+    <AppShell title="Report history" subtitle="Every PDF and Word report generated. Files are created on demand and not stored." width="max-w-5xl">
+      {error && <div className="mb-4"><Alert>{error}</Alert></div>}
+      <section className="workspace-card overflow-hidden rounded-2xl border border-slate-200/80 bg-white">
+        {!error && rows === null ? (
+          <div className="space-y-3 p-5" role="status" aria-label="Loading history">{[0, 1, 2, 3, 4].map(i => <Skeleton key={i} className="h-10" />)}</div>
+        ) : rows?.length === 0 ? (
+          <EmptyState icon="file" title="No reports yet">Reports you generate from a grant appear here.</EmptyState>
+        ) : rows?.length > 0 && (
+          <div className="overflow-x-auto">
+            <table data-workspace-table="true" className="w-full text-left text-sm">
+              <thead className="border-b border-slate-200"><tr>
+                <th className={th}>Generated</th><th className={th}>Format</th><th className={`${th} text-right`}>Grants</th>
+                <th className={`${th} text-right`}>Payment (USD)</th><th className={`${th} text-right`}>Beneficiaries</th>
+              </tr></thead>
+              <tbody className="divide-y divide-slate-100">{rows.map(row => (
+                <tr key={row.id}>
+                  <td className="whitespace-nowrap px-5 py-3.5 text-slate-700">{new Date(row.generated_at).toLocaleString()}</td>
+                  <td className="px-5 py-3.5">
+                    <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${row.format === 'PDF' ? 'bg-rose-50 text-rose-700 ring-rose-600/20' : 'bg-brand-50 text-brand-700 ring-brand-600/20'}`}>{row.format}</span>
+                  </td>
+                  <td className="px-5 py-3.5 text-right tabular-nums">{row.row_count}</td>
+                  <td className="px-5 py-3.5 text-right tabular-nums">{Number(row.total_received).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                  <td className="px-5 py-3.5 text-right tabular-nums">{row.total_beneficiaries}</td>
+                </tr>
+              ))}</tbody>
+            </table>
+          </div>
+        )}
+      </section>
+    </AppShell>
   )
 }

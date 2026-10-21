@@ -45,29 +45,28 @@ function FileUploadField({ name, label, value, onChange, folder = 'general', upl
 
   return (
     <div>
-      <label className="block text-sm font-medium text-gray-700 mb-1">
+      <label className="mb-1.5 block text-sm font-medium text-slate-700">
         {label}
       </label>
 
       {/* Show current file if exists */}
       {value && (
-        <div className="flex items-center gap-2 mb-2 p-2 bg-green-50
-                        border border-green-200 rounded-lg">
-          <span className="text-xs text-green-700 flex-1 truncate">
+        <div className="mb-2 flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-2.5">
+          <span className="flex-1 truncate text-xs font-medium text-emerald-700">
             ✓ File uploaded
           </span>
           <a
             href={value}
             target="_blank"
             rel="noreferrer"
-            className="text-xs text-blue-600 hover:underline flex-shrink-0"
+            className="shrink-0 text-xs font-medium text-brand-700 hover:underline"
           >
             View
           </a>
           <button
             type="button"
             onClick={handleRemove}
-            className="text-xs text-red-400 hover:text-red-600 flex-shrink-0"
+            className="shrink-0 text-xs font-medium text-rose-500 hover:text-rose-700"
           >
             Remove
           </button>
@@ -76,12 +75,10 @@ function FileUploadField({ name, label, value, onChange, folder = 'general', upl
 
       {/* Upload button */}
       <div className="flex gap-2 items-center">
-        <label className={`flex-1 flex items-center justify-center gap-2
-                          border-2 border-dashed rounded-lg px-4 py-3
-                          cursor-pointer transition text-sm
+        <label className={`flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-xl border-2 border-dashed px-4 py-4 text-sm transition
                           ${uploading
-                            ? 'border-gray-200 bg-gray-50 text-gray-400'
-                            : 'border-gray-300 hover:border-blue-400 hover:bg-blue-50 text-gray-500'
+                            ? 'border-slate-200 bg-slate-50 text-slate-400'
+                            : 'border-slate-200 text-slate-500 hover:border-brand-300 hover:bg-brand-50/50 hover:text-brand-700'
                           }`}>
           <input
             type="file"
@@ -91,11 +88,11 @@ function FileUploadField({ name, label, value, onChange, folder = 'general', upl
             accept={ACCEPT}
           />
           {uploading ? (
-            <span className="text-gray-400">Uploading...</span>
+            <span className="text-slate-400">Uploading…</span>
           ) : (
             <span>
               📎 {value ? 'Replace file' : 'Upload file'}
-              <span className="text-xs text-gray-400 ml-1">
+              <span className="ml-1 text-xs text-slate-400">
                 (image, PDF, Word, Excel — max 10MB)
               </span>
             </span>
@@ -104,7 +101,7 @@ function FileUploadField({ name, label, value, onChange, folder = 'general', upl
       </div>
 
       {uploadError && (
-        <p role="alert" className="text-xs text-red-500 mt-1">{uploadError}</p>
+        <p role="alert" className="mt-1 text-xs text-rose-600">{uploadError}</p>
       )}
     </div>
   )

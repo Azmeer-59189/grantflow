@@ -1,7 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
 import { apiFetch } from '../lib/api'
 import { useAccess } from '../context/Access'
+import AppShell from '../components/AppShell'
+import { Alert, Button, Skeleton } from '../components/ui'
+
+const ROLE_STYLE = {
+  owner: 'bg-brand-600 text-white ring-brand-600',
+  admin: 'bg-brand-50 text-brand-700 ring-brand-600/20',
+  editor: 'bg-emerald-50 text-emerald-700 ring-emerald-600/20',
+  viewer: 'bg-slate-100 text-slate-600 ring-slate-500/20',
+  disabled: 'bg-rose-50 text-rose-700 ring-rose-600/20',
+}
+const RoleBadge = ({ role }) => <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium capitalize ring-1 ring-inset ${ROLE_STYLE[role] || ROLE_STYLE.viewer}`}>{role === 'disabled' ? 'Revoked' : role}</span>
 
 export default function Access() {
   const { role, session } = useAccess()
@@ -50,27 +60,78 @@ export default function Access() {
     finally { setSaving(false) }
   }
   const choices = role === 'owner' ? ['viewer', 'editor', 'admin', 'owner', 'disabled'] : ['viewer', 'editor', 'disabled']
-  return <main className="mx-auto max-w-5xl px-4 py-10 sm:px-8">
-    <Link to="/" className="text-sm text-brand-600">Back to dashboard</Link>
-    <h1 className="mt-6 text-3xl font-semibold tracking-tight">Team access</h1>
-    <p className="mt-2 text-sm text-slate-500">Owners manage administrators and ownership. Administrators manage editors and viewers. The last owner is protected.</p>
-    <p className="mt-2 text-xs text-slate-500">Revoking access blocks GrantFlow API requests and uploads; it does not delete the Supabase account or previously public attachments. New accounts must first be provisioned in Supabase.</p>
-    {notice && <p role="status" className="mt-4 rounded-xl bg-emerald-50 p-3 text-sm text-emerald-700">{notice}</p>}
-    {error && <p role="alert" className="mt-4 rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{error}</p>}
-    {pending && <section role="region" aria-label="Confirm access change" className="my-5 rounded-xl border border-amber-200 bg-amber-50 p-4">
-      <p className="text-sm">Change <strong>{pending.email}</strong> from <strong>{pending.previous}</strong> to <strong>{pending.role}</strong>?</p>
-      <p className="mt-2 text-xs text-amber-800">{pending.role === 'disabled' ? 'This blocks their next GrantFlow request.' : pending.role === 'owner' ? 'This grants full control over team access and ownership.' : 'The change takes effect on subsequent API requests.'}</p>
-      <div className="mt-3 flex gap-3"><button disabled={saving} onClick={save} className="rounded-lg bg-brand-600 px-4 py-2 text-sm text-white">{saving ? 'Saving...' : 'Confirm change'}</button><button disabled={saving} onClick={() => setPending(null)} className="text-sm text-slate-600">Cancel</button></div>
-    </section>}
-    {loading && <p role="status" className="my-4 text-sm text-slate-500">Loading team...</p>}
-    <div className="my-6 overflow-x-auto rounded-2xl border border-slate-200 bg-white p-4"><table className="w-full text-left text-sm"><thead><tr><th className="p-3">Account</th><th className="p-3">Current role</th><th className="p-3">Change access</th></tr></thead><tbody>{users.map(user => {
-      const protectedUser = role !== 'owner' && ['owner', 'admin'].includes(user.role)
-      return <tr key={user.id} className="border-t border-slate-100"><td className="p-3">{user.email || user.id}{user.id === session.user.id && <span className="ml-2 text-xs text-slate-400">You</span>}</td><td className="p-3 font-medium">{user.role}</td><td className="p-3"><select aria-label={`Change access for ${user.email || user.id}`} value="" disabled={protectedUser || saving || loading} onChange={event => setPending({ id: user.id, email: user.email || user.id, previous: user.role, role: event.target.value })} className="rounded-lg border border-slate-200 px-3 py-2"><option value="">{protectedUser ? 'Owner manages this account' : 'Choose a role'}</option>{choices.filter(choice => choice !== user.role).map(choice => <option key={choice} value={choice}>{choice === 'disabled' ? 'Revoke access' : choice}</option>)}</select></td></tr>
-    })}</tbody></table>{!users.length && !loading && <p className="p-3 text-sm text-slate-500">No users on this page.</p>}</div>
-    <div className="flex items-center gap-4 text-sm"><button disabled={page === 1 || loading || saving} onClick={() => { setPage(page - 1); setPending(null) }}>Previous</button><span>Page {page}</span><button disabled={users.length < 50 || loading || saving} onClick={() => { setPage(page + 1); setPending(null) }}>Next</button></div>
-    <h2 className="mb-4 mt-10 text-xl font-semibold">Permission history</h2>
-    <div className="space-y-2">{history.map(entry => <div key={entry.id} className="rounded-xl border border-slate-200 bg-white p-4 text-sm"><p>{entry.target_email || entry.target_id}: <strong>{entry.previous_role}</strong> → <strong>{entry.new_role}</strong></p><p className="mt-1 text-xs text-slate-500">By {entry.actor_email || entry.actor_id} · {new Date(entry.created_at).toLocaleString()}</p></div>)}</div>
-    {!history.length && !loading && <p className="text-sm text-slate-500">No permission changes on this page.</p>}
-    <div className="mt-4 flex gap-4 text-sm"><button disabled={!offset || loading || saving} onClick={() => setOffset(offset - 50)}>Previous changes</button><button disabled={history.length < 50 || loading || saving} onClick={() => setOffset(offset + 50)}>More changes</button></div>
-  </main>
+  const select = 'h-9 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 focus:border-brand-400 focus:outline-none focus:ring-4 focus:ring-brand-100 disabled:bg-slate-50'
+  return (
+    <AppShell title="Team access" width="max-w-5xl"
+              subtitle="Owners manage administrators and ownership. Administrators manage editors and viewers. The last owner is protected.">
+      <div className="mb-6"><Alert tone="info">Revoking access blocks GrantFlow requests and uploads. It does not delete the Supabase account or files already shared. New accounts must first be created in Supabase.</Alert></div>
+      {notice && <div className="mb-4"><Alert tone="success">{notice}</Alert></div>}
+      {error && <div className="mb-4"><Alert>{error}</Alert></div>}
+
+      {pending && (
+        <section role="region" aria-label="Confirm access change" className="mb-6 rounded-2xl border border-amber-200 bg-amber-50 p-5">
+          <p className="text-sm text-slate-800">Change <strong>{pending.email}</strong> from <RoleBadge role={pending.previous} /> to <RoleBadge role={pending.role} />?</p>
+          <p className="mt-2 text-xs text-amber-800">{pending.role === 'disabled' ? 'This blocks their next GrantFlow request.' : pending.role === 'owner' ? 'This grants full control over team access and ownership.' : 'The change takes effect on their next request.'}</p>
+          <div className="mt-4 flex gap-2">
+            <Button variant="primary" disabled={saving} onClick={save}>{saving ? 'Saving…' : 'Confirm change'}</Button>
+            <Button variant="ghost" disabled={saving} onClick={() => setPending(null)}>Cancel</Button>
+          </div>
+        </section>
+      )}
+
+      <section className="workspace-card overflow-hidden rounded-2xl border border-slate-200/80 bg-white">
+        <header className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+          <h2 className="text-[15px] font-semibold text-slate-900">Members</h2>
+          <div className="flex items-center gap-2 text-sm">
+            <Button size="sm" disabled={page === 1 || loading || saving} onClick={() => { setPage(page - 1); setPending(null) }}>Previous</Button>
+            <span className="text-xs text-slate-500">Page {page}</span>
+            <Button size="sm" disabled={users.length < 50 || loading || saving} onClick={() => { setPage(page + 1); setPending(null) }}>Next</Button>
+          </div>
+        </header>
+        {loading && !users.length ? (
+          <div className="space-y-3 p-5" role="status" aria-label="Loading team">{[0, 1, 2].map(i => <Skeleton key={i} className="h-12" />)}</div>
+        ) : (
+          <ul className="divide-y divide-slate-100">
+            {users.map(user => {
+              const protectedUser = role !== 'owner' && ['owner', 'admin'].includes(user.role)
+              const name = user.email || user.id
+              return (
+                <li key={user.id} className="flex flex-wrap items-center gap-4 px-5 py-3.5">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-50 text-sm font-semibold text-brand-700">{name[0]?.toUpperCase()}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-medium text-slate-900">{name}{user.id === session.user.id && <span className="ml-2 text-xs font-normal text-slate-400">You</span>}</span>
+                  </span>
+                  <RoleBadge role={user.role} />
+                  <select aria-label={`Change access for ${name}`} value="" disabled={protectedUser || saving || loading}
+                          onChange={event => setPending({ id: user.id, email: name, previous: user.role, role: event.target.value })} className={select}>
+                    <option value="">{protectedUser ? 'Managed by owner' : 'Change role…'}</option>
+                    {choices.filter(choice => choice !== user.role).map(choice => <option key={choice} value={choice}>{choice === 'disabled' ? 'Revoke access' : choice}</option>)}
+                  </select>
+                </li>
+              )
+            })}
+            {!users.length && !loading && <li className="p-5 text-sm text-slate-500">No users on this page.</li>}
+          </ul>
+        )}
+      </section>
+
+      <h2 className="mb-4 mt-10 text-lg font-semibold text-slate-900">Permission history</h2>
+      <section className="workspace-card rounded-2xl border border-slate-200/80 bg-white">
+        <ul className="divide-y divide-slate-100">
+          {history.map(entry => (
+            <li key={entry.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-5 py-3.5 text-sm">
+              <span className="font-medium text-slate-900">{entry.target_email || entry.target_id}</span>
+              <RoleBadge role={entry.previous_role} /><span className="text-slate-400" aria-label="to">→</span><RoleBadge role={entry.new_role} />
+              <span className="w-full text-xs text-slate-500 sm:ml-auto sm:w-auto">By {entry.actor_email || entry.actor_id} · {new Date(entry.created_at).toLocaleString()}</span>
+            </li>
+          ))}
+          {!history.length && !loading && <li className="p-5 text-sm text-slate-500">No permission changes on this page.</li>}
+        </ul>
+      </section>
+      <div className="mt-4 flex gap-2">
+        <Button size="sm" disabled={!offset || loading || saving} onClick={() => setOffset(offset - 50)}>Newer changes</Button>
+        <Button size="sm" disabled={history.length < 50 || loading || saving} onClick={() => setOffset(offset + 50)}>Older changes</Button>
+      </div>
+    </AppShell>
+  )
 }

@@ -36,6 +36,16 @@ table[data-workspace-table] thead { background: #f8f9fc; }
 table[data-workspace-table] tbody tr { transition: background 140ms; }
 table[data-workspace-table] tbody tr:hover { background: #f7f7ff; }
 .login-art { background: #eeeffa; background-image: radial-gradient(ellipse at 15% 10%, #f7f4ec 0%, transparent 55%), radial-gradient(ellipse at 85% 90%, #dcdff8 0%, transparent 60%); }
+@keyframes gf-fade-up { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes gf-slide-left { from { transform: translateX(100%); } to { transform: none; } }
+@keyframes gf-slide-right { from { transform: translateX(-100%); } to { transform: none; } }
+.page-in { animation: gf-fade-up 220ms ease-out; }
+.toast-in { animation: gf-fade-up 200ms ease-out; }
+.drawer-panel { animation: gf-slide-left 240ms cubic-bezier(.2,.8,.2,1); }
+.drawer-left { animation: gf-slide-right 220ms cubic-bezier(.2,.8,.2,1); }
+.hero-card { background: linear-gradient(135deg, var(--color-brand-600) 0%, var(--color-brand-800) 100%); }
+.hero-card::after { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  background: radial-gradient(circle at 85% 15%, rgb(255 255 255 / 14%) 0, transparent 45%); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }

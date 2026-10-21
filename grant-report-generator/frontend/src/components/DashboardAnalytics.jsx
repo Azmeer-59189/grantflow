@@ -272,12 +272,12 @@ export default function DashboardAnalytics({ filteredGrants, onStageSelect }) {
 
   return <>
     <PipelineCard grants={filteredGrants} onStageSelect={onStageSelect} />
-    <div className="mb-6 grid gap-6 lg:grid-cols-2">
+    <div className="mb-6 grid gap-6 lg:grid-cols-2 [&>*]:min-w-0">
       <FundingCard grants={filteredGrants} />
       <CountryCard grants={filteredGrants} />
     </div>
     <PaymentsCard grants={filteredGrants} />
-    <div className="grid gap-6 lg:grid-cols-2">
+    <div className="grid gap-6 lg:grid-cols-2 [&>*]:min-w-0">
       <DonutCard
         title="Report status" subtitle={`${filteredGrants.length} grants in total`}
         data={reportStatusData} colorFor={n => STATUS_COLORS[n] || '#94a3b8'}

@@ -4,6 +4,12 @@ import useUnsavedChanges from '../hooks/useUnsavedChanges'
 import { apiFetch } from '../lib/api'
 import { useState } from 'react'
 import FileUploadField from '../components/FileUploadField'
+import AppShell from '../components/AppShell'
+import { StatusPill } from '../components/ui'
+import {
+  DateField, FormSaveBar, labelClass, LinkField, NumberField, ReadOnlyField,
+  SectionHeader, SelectField, TextareaField, TextField,
+} from '../components/GrantFormFields'
 import ExchangeRateField from '../components/ExchangeRateField'
 import useExchangeRate from '../hooks/useExchangeRate'
 import useUploadCleanup from '../hooks/useUploadCleanup'
@@ -73,160 +79,6 @@ const ALL_PROJECT_TYPES = ['Expansion', 'Non-Expansion']
 const PROJECT_TYPES_BY_CHAPTER = { 'IHN UK': ['Expansion'] }   // keep in sync with the backend
 function projectTypesFor(chapter) {
   return PROJECT_TYPES_BY_CHAPTER[chapter] || ALL_PROJECT_TYPES
-}
-
-// ── Field components — defined OUTSIDE so they never remount ───────────────
-const inputClass = `w-full border border-gray-300 rounded-lg px-4 py-2
-  text-sm focus:outline-none focus:ring-2 focus:ring-brand-500`
-const labelClass = `block text-sm font-medium text-gray-700 mb-1`
-
-function SectionHeader({ title }) {
-  return (
-    <div className="col-span-full border-t border-slate-100 pt-7 mt-3">
-      <h3 className="text-xs font-semibold text-brand-700 uppercase tracking-[0.14em]">
-        {title}
-      </h3>
-    </div>
-  )
-}
-
-function TextField({ name, label, placeholder, required, value, onChange, disabled }) {
-  return (
-    <div>
-      <label htmlFor={name} className={labelClass}>
-        {label} {required && <span className="text-red-500">*</span>}
-      </label>
-      <input
-        type="text"
-        id={name}
-        name={name}
-        value={value}
-        onChange={onChange}
-        placeholder={placeholder || ''}
-        disabled={disabled}
-        className={`${inputClass} ${disabled ? 'bg-gray-50 text-gray-400 cursor-not-allowed' : ''}`}
-      />
-    </div>
-  )
-}
-
-function NumberField({ name, label, readOnly, hint, value, onChange }) {
-  return (
-    <div>
-      <label htmlFor={name} className={labelClass}>{label}</label>
-      {hint && <p className="text-xs text-brand-500 mb-1">{hint}</p>}
-      <input
-        type="number"
-        id={name}
-        name={name}
-        value={value}
-        onChange={onChange}
-        readOnly={readOnly}
-        min="0"
-        step="0.01"
-        className={`${inputClass} ${readOnly ? 'bg-gray-50 text-gray-500 cursor-not-allowed' : ''}`}
-      />
-    </div>
-  )
-}
-
-function DateField({ name, label, value, onChange }) {
-  return (
-    <div>
-      <label htmlFor={name} className={labelClass}>{label}</label>
-      <input
-        type="date"
-        id={name}
-        name={name}
-        value={value}
-        onChange={onChange}
-        className={inputClass}
-      />
-    </div>
-  )
-}
-
-function SelectField({ name, label, options, required, value, onChange }) {
-  return (
-    <div>
-      <label htmlFor={name} className={labelClass}>
-        {label} {required && <span className="text-red-500">*</span>}
-      </label>
-      <select
-        id={name}
-        name={name}
-        value={value}
-        onChange={onChange}
-        className={inputClass}
-      >
-        <option value="">— Select —</option>
-        {options.map(opt => (
-          <option key={opt} value={opt}>{opt}</option>
-        ))}
-      </select>
-    </div>
-  )
-}
-
-function LinkField({ name, label, value, onChange }) {
-  return (
-    <div>
-      <label htmlFor={name} className={labelClass}>{label}</label>
-      <div className="flex gap-2">
-        <input
-          type="url"
-          id={name}
-        name={name}
-          value={value}
-          onChange={onChange}
-          placeholder="https://"
-          className={`${inputClass} flex-1`}
-        />
-        {value && (
-          <a
-            href={value}
-            target="_blank"
-            rel="noreferrer"
-            className="flex-shrink-0 bg-brand-700 text-white text-xs
-                       px-3 py-2 rounded-lg hover:bg-brand-800 transition
-                       flex items-center"
-          >
-            Open
-          </a>
-        )}
-      </div>
-    </div>
-  )
-}
-
-function TextareaField({ name, label, value, onChange }) {
-  return (
-    <div>
-      <label htmlFor={name} className={labelClass}>{label}</label>
-      <textarea
-        id={name}
-        name={name}
-        value={value}
-        onChange={onChange}
-        rows={3}
-        className={`${inputClass} resize-none`}
-      />
-    </div>
-  )
-}
-
-function StatusBadge({ status }) {
-  const colors = {
-    'Complete': 'bg-brand-100 text-brand-700',
-    'Pending': 'bg-amber-100 text-amber-700',
-    'Incomplete Information': 'bg-red-100 text-red-700',
-  }
-  return (
-    <span className={`px-3 py-1 rounded-full text-xs font-medium
-                     ${colors[status] || 'bg-gray-100 text-gray-600'}`}>
-      {status}
-    </span>
-  )
 }
 
 // ── Main component ─────────────────────────────────────────────────────────
@@ -314,51 +166,18 @@ function AddGrant() {
   const reportStatus = calcReportStatus(form)
 
   return (
-    <div className="min-h-screen bg-canvas">
-
-      {/* Navbar */}
-      <nav className="bg-white border-b border-gray-200 px-6 py-4
-                      flex justify-between items-center sticky top-0 z-10">
-        <h1 className="text-xl font-bold text-brand-900">GrantFlow</h1>
-        <div className="flex items-center gap-4">
-          {form.secondary_currency && fx.rate && (
-            <span className="text-xs text-green-600 font-medium">
-              1 {form.secondary_currency} = {fx.rate.toFixed(4)} USD
-            </span>
-          )}
-          <button
-            onClick={() => navigate('/')}
-            className="text-sm text-gray-500 hover:text-gray-700"
-          >
-            ← Back
-          </button>
-        </div>
-      </nav>
-
-      <div className="max-w-5xl mx-auto px-4 sm:px-6 py-10">
-        <div className="flex flex-wrap justify-between items-center gap-4 mb-8">
-          <div>
-            <h2 className="text-3xl font-semibold tracking-tight text-slate-900">Add New Grant</h2>
-            <p className="text-sm text-gray-500 mt-1">
-              Required fields marked with *
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-gray-500">Report Status:</span>
-            <StatusBadge status={reportStatus} />
-          </div>
-        </div>
-
-        {error && (
-          <div className="bg-red-50 text-red-600 text-sm p-3 rounded-lg mb-4">
-            {error}
-          </div>
-        )}
-
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-200/80 p-5 sm:p-8">
-          <fieldset disabled={loading}>
-          <FormProgress form={form} dirty={dirty} />
-          <GrantSections>
+    <AppShell
+      title="Add new grant"
+      subtitle={"Required fields are marked with *. Everything else can be filled in as it arrives."}
+      back={{ to: '/?view=records', label: 'Back to records' }}
+      actions={form.secondary_currency && fx.rate && (
+        <span className="rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700 ring-1 ring-inset ring-emerald-600/20">
+          1 {form.secondary_currency} = {fx.rate.toFixed(4)} USD
+        </span>
+      )}
+    >
+          <fieldset disabled={loading} className="min-w-0">
+          <GrantSections form={form} aside={<FormProgress form={form} dirty={dirty} />}>
 
             {/* ── Basic Information ─────────────────────────────── */}
             <SectionHeader sectionMarker title="Basic Information" />
@@ -418,20 +237,7 @@ function AddGrant() {
             <SectionHeader sectionMarker title="Financial Details" />
 
             {/* Primary currency — always USD */}
-            <div>
-              <label htmlFor="primary_currency" className={labelClass}>Primary Currency</label>
-              <input
-                id="primary_currency"
-                type="text"
-                value="USD"
-                readOnly
-                className={`${inputClass} bg-gray-50 text-gray-500
-                            cursor-not-allowed`}
-              />
-              <p className="text-xs text-gray-400 mt-1">
-                Always USD — all amounts converted to USD
-              </p>
-            </div>
+            <ReadOnlyField id="primary_currency" label="Primary currency" value="USD" hint="All amounts are also kept in USD." />
 
             {/* Secondary currency — user selects */}
             <SelectField
@@ -655,8 +461,8 @@ function AddGrant() {
             <div>
               <p className={labelClass}>Report Status</p>
               <div className="mt-2">
-                <StatusBadge status={reportStatus} />
-                <p className="text-xs text-gray-400 mt-1">
+                <StatusPill value={reportStatus} />
+                <p className="mt-1.5 text-xs text-slate-500">
                   Auto-calculated based on filled fields
                 </p>
               </div>
@@ -669,23 +475,15 @@ function AddGrant() {
             </div>
 
           </GrantSections>
-
-          {/* Submit */}
-          <div className="mt-6 pt-4 border-t border-gray-100">
-            <button
-              onClick={handleSubmit}
-              disabled={loading || rateMissing}
-              className="w-full bg-brand-700 text-white py-3 rounded-lg
-                         font-medium hover:bg-brand-800 transition
-                         disabled:opacity-50"
-            >
-              {loading ? 'Saving to Google Sheets...' : 'Add Grant'}
-            </button>
-          </div>
           </fieldset>
-        </div>
-      </div>
-    </div>
+
+      <FormSaveBar
+        status={reportStatus} dirty={dirty} error={error}
+        saving={loading} disabled={rateMissing}
+        saveLabel={'Add grant'} savingLabel={'Saving to Google Sheets…'}
+        onSave={handleSubmit} onCancel={() => navigate(-1)}
+      />
+    </AppShell>
   )
 }
 

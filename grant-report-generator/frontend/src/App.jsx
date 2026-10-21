@@ -4,6 +4,7 @@ import { supabase } from './supabase'
 import { apiFetch } from './lib/api'
 import { AccessContext, useAccess } from './context/Access'
 import Login from './pages/Login'
+import { ToastProvider } from './context/Toast'
 
 const Dashboard = lazy(() => import('./pages/Dashboard'))
 const AddGrant = lazy(() => import('./pages/AddGrant'))
@@ -12,7 +13,15 @@ const History = lazy(() => import('./pages/History'))
 const Audit = lazy(() => import('./pages/Audit'))
 const Access = lazy(() => import('./pages/Access'))
 
-function Loading() { return <p role="status" className="p-10 text-center text-sm text-slate-500">Loading workspace...</p> }
+function Loading() {
+  return (
+    <div role="status" className="flex min-h-screen items-center justify-center bg-canvas">
+      <span className="flex items-center gap-3 text-sm text-slate-500">
+        <span className="h-5 w-5 animate-spin rounded-full border-2 border-brand-200 border-t-brand-600" />Loading workspace...
+      </span>
+    </div>
+  )
+}
 function Protected({ page, editor = false, admin = false }) {
   const { session, role, loading, error } = useAccess()
   if (loading) return <Loading />
@@ -67,5 +76,5 @@ export default function App() {
     })
     return () => { active = false; subscription.unsubscribe() }
   }, [])
-  return <AccessContext.Provider value={access}><RouterProvider router={router} /></AccessContext.Provider>
+  return <AccessContext.Provider value={access}><ToastProvider><RouterProvider router={router} /></ToastProvider></AccessContext.Provider>
 }
